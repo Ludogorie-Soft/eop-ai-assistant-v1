@@ -1,22 +1,28 @@
 'use client';
 
 import { useState } from 'react';
+import type { SmrResult } from './KssSmrSection';
 
 interface GenerateDocxButtonProps {
   introductionText: string;
   rawText?: string;
+  smrResults?: SmrResult[];
 }
 
 export function GenerateDocxButton({
   introductionText,
   rawText,
+  smrResults = [],
 }: GenerateDocxButtonProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const hasIntroduction = introductionText.trim().length > 0;
+  const hasSmr = smrResults.length > 0;
+
   const handleGenerate = async () => {
-    if (!introductionText.trim()) {
-      setError('Въведете или генерирайте текст на увода.');
+    if (!hasIntroduction && !hasSmr) {
+      setError('Въведете/генерирайте увод и/или генерирайте текстове за КСС за експорт.');
       return;
     }
     setLoading(true);
@@ -25,7 +31,11 @@ export function GenerateDocxButton({
       const res = await fetch('/api/generate-docx', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ introductionText, rawText: rawText ?? '' }),
+        body: JSON.stringify({
+          introductionText: hasIntroduction ? introductionText : undefined,
+          rawText: rawText ?? '',
+          smrResults: hasSmr ? smrResults : undefined,
+        }),
       });
       if (!res.ok) {
         const text = await res.text();
@@ -69,12 +79,12 @@ export function GenerateDocxButton({
         Експорт
       </h2>
       <p className="mt-1 text-sm text-neutral-600">
-        Генерирайте DOCX файл с увода и го изтеглете.
+        Генерирайте DOCX: с увод (ако има), после текстове за КСС (ако има). Можете да експортнете само увод, само КСС или и двете.
       </p>
       <div className="mt-3">
         <button
           onClick={handleGenerate}
-          disabled={loading || !introductionText.trim()}
+          disabled={loading || (!hasIntroduction && !hasSmr)}
           className="rounded-md bg-neutral-700 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
         >
           {loading ? 'Генериране...' : 'Генерирай DOCX'}

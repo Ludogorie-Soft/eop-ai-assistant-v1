@@ -91,78 +91,139 @@ function parseBlock(block: string): { heading: string; body: string } | null {
   return null;
 }
 
+export type SmrResultForDocx = {
+  kssCode: string;
+  kssName: string;
+  matchedTitle: string | null;
+  text: string;
+  confidence: number;
+};
+
 export async function generateTenderDocx(
-  introductionText: string,
-  rawText?: string
+  introductionText: string | undefined,
+  rawText?: string,
+  smrResults?: SmrResultForDocx[]
 ): Promise<{ buffer: Buffer; filename: string }> {
   const paragraphs: Paragraph[] = [];
+  const hasIntroduction = Boolean(introductionText?.trim());
+  const hasSmr = Boolean(smrResults?.length);
 
-  paragraphs.push(
-    new Paragraph({
-      children: [
-        new TextRun({
-          text: '1. УВОД',
-          font: FONT,
-          size: FONT_SIZE,
-          bold: true,
-        }),
-      ],
-      heading: HeadingLevel.HEADING_1,
-      alignment: AlignmentType.LEFT,
-      spacing: { ...defaultSpacing, after: 400 },
-    })
-  );
+  if (hasIntroduction) {
+    paragraphs.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: '1. УВОД',
+            font: FONT,
+            size: FONT_SIZE,
+            bold: true,
+          }),
+        ],
+        heading: HeadingLevel.HEADING_1,
+        alignment: AlignmentType.LEFT,
+        spacing: { ...defaultSpacing, after: 400 },
+      })
+    );
 
-  const blocks = introductionText
-    .split(/\n\n+/)
-    .map((s) => s.trim().replace(/\*\*([^*]+)\*\*/g, '$1'))
-    .filter((b) => {
-      const t = b.replace(/\*\*/g, '').trim().toLowerCase();
-      return Boolean(b) && t !== 'увод';
-    });
+    const blocks = (introductionText ?? '')
+      .split(/\n\n+/)
+      .map((s) => s.trim().replace(/\*\*([^*]+)\*\*/g, '$1'))
+      .filter((b) => {
+        const t = b.replace(/\*\*/g, '').trim().toLowerCase();
+        return Boolean(b) && t !== 'увод';
+      });
 
-  for (const block of blocks) {
-    const parsed = parseBlock(block);
+    for (const block of blocks) {
+      const parsed = parseBlock(block);
 
-    if (parsed) {
+      if (parsed) {
+        paragraphs.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: parsed.heading,
+                font: FONT,
+                size: FONT_SIZE,
+                bold: true,
+              }),
+            ],
+            spacing: { ...defaultSpacing, after: 0, before: 0 },
+          })
+        );
+        if (parsed.body) {
+          paragraphs.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: parsed.body,
+                  font: FONT,
+                  size: FONT_SIZE,
+                }),
+              ],
+              spacing: { ...defaultSpacing, before: 0 },
+            })
+          );
+        }
+      } else {
+        paragraphs.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: block,
+                font: FONT,
+                size: FONT_SIZE,
+              }),
+            ],
+            spacing: defaultSpacing,
+          })
+        );
+      }
+    }
+  }
+
+  if (hasSmr && smrResults) {
+    const smrSectionTitle = hasIntroduction ? '2. ТЕКСТОВЕ ЗА КСС' : '1. ТЕКСТОВЕ ЗА КСС';
+    paragraphs.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: smrSectionTitle,
+            font: FONT,
+            size: FONT_SIZE,
+            bold: true,
+          }),
+        ],
+        heading: HeadingLevel.HEADING_1,
+        alignment: AlignmentType.LEFT,
+        spacing: { ...defaultSpacing, before: hasIntroduction ? 400 : 0, after: 400 },
+      })
+    );
+
+    for (const r of smrResults) {
+      const subheading = `${r.kssCode} – ${r.kssName}`;
       paragraphs.push(
         new Paragraph({
           children: [
             new TextRun({
-              text: parsed.heading,
+              text: subheading,
               font: FONT,
               size: FONT_SIZE,
               bold: true,
             }),
           ],
-          spacing: { ...defaultSpacing, after: 0, before: 0 },
+          spacing: { ...defaultSpacing, after: 0, before: 200 },
         })
       );
-      if (parsed.body) {
-        paragraphs.push(
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: parsed.body,
-                font: FONT,
-                size: FONT_SIZE,
-              }),
-            ],
-            spacing: { ...defaultSpacing, before: 0 },
-          })
-        );
-      }
-    } else {
       paragraphs.push(
         new Paragraph({
           children: [
             new TextRun({
-              text: block,
+              text: r.text,
               font: FONT,
               size: FONT_SIZE,
             }),
           ],
-          spacing: defaultSpacing,
+          spacing: { ...defaultSpacing, before: 0 },
         })
       );
     }
@@ -179,9 +240,14 @@ export async function generateTenderDocx(
 
   const buffer = Buffer.from(await Packer.toBuffer(doc));
   const orderNumber = rawText ? extractOrderNumber(rawText) : null;
-  const filename = orderNumber
-    ? `поръчка_${orderNumber}.docx`
-    : `поръчка_${extractMainObjectFromSubject(introductionText)}.docx`;
+  let filename: string;
+  if (orderNumber) {
+    filename = `поръчка_${orderNumber}.docx`;
+  } else if (hasIntroduction && introductionText) {
+    filename = `поръчка_${extractMainObjectFromSubject(introductionText)}.docx`;
+  } else {
+    filename = `поръчка_КСС_${new Date().toISOString().slice(0, 10)}.docx`;
+  }
 
   return { buffer, filename };
 }

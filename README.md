@@ -7,7 +7,7 @@ Production-ready MVP web application for generating Tender Technical documents. 
 - **Frontend:** Next.js 15 App Router, React, TypeScript, TailwindCSS
 - **Backend:** Next.js API Routes (Route Handlers)
 - **AI:** LangChain, OpenAI (server-side only)
-- **Document processing:** docx, pdf-parse, mammoth
+- **Document processing:** docx, pdf-parse, mammoth, xlsx
 
 ## Features
 
@@ -16,7 +16,8 @@ Production-ready MVP web application for generating Tender Technical documents. 
 - **Fallback** – Without Supabase: simple fetch + HTML link parsing (works for static pages)
 - **File upload** – PDF, DOC and DOCX extraction (multiple files)
 - **AI Introduction** – LangChain + OpenAI generation with strict rephrasing rules
-- **DOCX export** – Download `tender_technical.docx` with formatted Introduction
+- **KSS → SMR** – Upload KSS Excel + "Шаблони СМР.docx"; LLM matches each KSS position to an SMR block and returns descriptive text (confidence ≥ 60) or "[не е намерен]"
+- **DOCX export** – Download DOCX with **1. Увод** and **2. Текстове за КСС** (if KSS SMR was generated)
 
 ## Project structure
 
@@ -26,6 +27,7 @@ Production-ready MVP web application for generating Tender Technical documents. 
 │   │   ├── cais/route.ts
 │   │   ├── parse-files/route.ts
 │   │   ├── generate-introduction/route.ts
+│   │   ├── generate-kss-smr/route.ts
 │   │   └── generate-docx/route.ts
 │   ├── components/
 │   ├── layout.tsx
@@ -37,6 +39,10 @@ Production-ready MVP web application for generating Tender Technical documents. 
 │   ├── fileParser.ts
 │   ├── langchainClient.ts
 │   ├── introductionGenerator.ts
+│   ├── kssParser.ts
+│   ├── smrTemplateParser.ts
+│   ├── smrMatcher.ts
+│   ├── kssSmrGenerator.ts
 │   ├── docxGenerator.ts
 │   ├── filenameEncoding.ts
 │   └── prompts/

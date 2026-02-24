@@ -3,25 +3,33 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { generateTenderDocx } from '@/lib/docxGenerator';
+import { generateTenderDocx, type SmrResultForDocx } from '@/lib/docxGenerator';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { introductionText, rawText } = body as {
+    const { introductionText, rawText, smrResults } = body as {
       introductionText?: string;
       rawText?: string;
+      smrResults?: SmrResultForDocx[];
     };
-    if (!introductionText || typeof introductionText !== 'string') {
+    const hasIntroduction = typeof introductionText === 'string' && introductionText.trim().length > 0;
+    const hasSmr = Array.isArray(smrResults) && smrResults.length > 0;
+    if (!hasIntroduction && !hasSmr) {
       return NextResponse.json(
-        { error: 'Introduction text is required' },
+        { error: 'Нужен е поне увод или генерирани текстове за КСС за експорт.' },
         { status: 400 }
       );
     }
 
+    const smr: SmrResultForDocx[] | undefined = Array.isArray(smrResults)
+      ? smrResults
+      : undefined;
+
     const { buffer, filename } = await generateTenderDocx(
-      introductionText,
-      typeof rawText === 'string' ? rawText : undefined
+      hasIntroduction ? introductionText : undefined,
+      typeof rawText === 'string' ? rawText : undefined,
+      smr
     );
 
     const asciiFallback = 'tender.docx';

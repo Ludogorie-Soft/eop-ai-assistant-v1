@@ -4,11 +4,13 @@ import { useState } from 'react';
 import { TenderSource } from './TenderSource';
 import { RawExtractedText } from './RawExtractedText';
 import { Introduction } from './Introduction';
+import { KssSmrSection, type SmrResult } from './KssSmrSection';
 import { GenerateDocxButton } from './GenerateDocxButton';
 
 export function HomePage() {
   const [rawText, setRawText] = useState('');
   const [introductionText, setIntroductionText] = useState('');
+  const [smrResults, setSmrResults] = useState<SmrResult[]>([]);
 
   const handleRawTextUpdate = (text: string) => {
     setRawText(text);
@@ -39,9 +41,14 @@ export function HomePage() {
           introductionText={introductionText}
           onIntroductionUpdate={handleIntroductionUpdate}
         />
+        <KssSmrSection
+          smrResults={smrResults}
+          onSmrResultsUpdate={setSmrResults}
+        />
         <GenerateDocxButton
           introductionText={introductionText}
           rawText={rawText}
+          smrResults={smrResults}
         />
       </main>
     </div>
