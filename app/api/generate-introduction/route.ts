@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { generateIntroduction } from '@/lib/introductionGenerator';
+import { appendVerbatimSections } from '@/lib/verbatimSections';
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,7 +19,8 @@ export async function POST(request: NextRequest) {
     }
 
     const introduction = await generateIntroduction(sourceText);
-    return NextResponse.json({ introduction });
+    const withVerbatim = appendVerbatimSections(introduction, sourceText);
+    return NextResponse.json({ introduction: withVerbatim });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : 'Failed to generate introduction';

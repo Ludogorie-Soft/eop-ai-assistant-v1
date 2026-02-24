@@ -29,9 +29,17 @@ export function Introduction({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sourceText: rawText }),
       });
-      const data = await res.json();
+      const text = await res.text();
+      let data: { introduction?: string; error?: string } = {};
+      if (text) {
+        try {
+          data = JSON.parse(text) as { introduction?: string; error?: string };
+        } catch {
+          data = {};
+        }
+      }
       if (!res.ok) throw new Error(data.error ?? 'Failed to generate');
-      onIntroductionUpdate(data.introduction);
+      onIntroductionUpdate(data.introduction ?? '');
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Грешка при генериране на увод'

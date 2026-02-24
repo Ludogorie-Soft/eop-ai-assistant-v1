@@ -116,7 +116,7 @@ Serves the built app at http://localhost:3000.
 ## Security
 
 - CAIS URL validation (only cais.bg, eop.bg, opendata.cais.bg)
-- File size limit: 10MB per file
+- File size limit: 100MB per file
 - Only PDF, DOC and DOCX allowed
 - OpenAI API key used only on the server
 

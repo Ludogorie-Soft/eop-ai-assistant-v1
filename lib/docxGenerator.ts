@@ -25,6 +25,20 @@ const defaultSpacing = {
   after: 200,
 };
 
+/** Extract order number (номер на поръчката) from raw documentation text for filename */
+export function extractOrderNumber(rawText: string): string | null {
+  if (!rawText?.trim()) return null;
+  const m1 = rawText.match(/номера?\s*на\s*поръчката\s*(?:е)?\s*[:\s]*([0-9A-Za-z\-]+)/i);
+  if (m1?.[1]) return m1[1].trim().replace(/[^\w\-]/g, '') || null;
+  const m2 = rawText.match(/поръчката\s*(\d{5}-\d{4}-\d{4})/i);
+  if (m2?.[1]) return m2[1];
+  const m3 = rawText.match(/референтен\s*номер\s*[:\s]*([0-9A-Za-z\-]+)/i);
+  if (m3?.[1] && m3[1].trim() !== 'Непопълнено') return m3[1].trim().replace(/[^\w\-]/g, '') || null;
+  const m4 = rawText.match(/(\d{5}-\d{4}-\d{4})/);
+  if (m4?.[1]) return m4[1];
+  return null;
+}
+
 /** Extract short main object (e.g. institution name) for filename */
 export function extractMainObjectFromSubject(introductionText: string): string {
   const fullText = introductionText.replace(/\*\*/g, '');
@@ -78,7 +92,8 @@ function parseBlock(block: string): { heading: string; body: string } | null {
 }
 
 export async function generateTenderDocx(
-  introductionText: string
+  introductionText: string,
+  rawText?: string
 ): Promise<{ buffer: Buffer; filename: string }> {
   const paragraphs: Paragraph[] = [];
 
@@ -163,8 +178,10 @@ export async function generateTenderDocx(
   });
 
   const buffer = Buffer.from(await Packer.toBuffer(doc));
-  const mainObject = extractMainObjectFromSubject(introductionText);
-  const filename = `поръчка_${mainObject}.docx`;
+  const orderNumber = rawText ? extractOrderNumber(rawText) : null;
+  const filename = orderNumber
+    ? `поръчка_${orderNumber}.docx`
+    : `поръчка_${extractMainObjectFromSubject(introductionText)}.docx`;
 
   return { buffer, filename };
 }

@@ -39,7 +39,10 @@ export function HomePage() {
           introductionText={introductionText}
           onIntroductionUpdate={handleIntroductionUpdate}
         />
-        <GenerateDocxButton introductionText={introductionText} />
+        <GenerateDocxButton
+          introductionText={introductionText}
+          rawText={rawText}
+        />
       </main>
     </div>
   );

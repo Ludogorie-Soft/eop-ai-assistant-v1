@@ -8,7 +8,10 @@ import { generateTenderDocx } from '@/lib/docxGenerator';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { introductionText } = body as { introductionText?: string };
+    const { introductionText, rawText } = body as {
+      introductionText?: string;
+      rawText?: string;
+    };
     if (!introductionText || typeof introductionText !== 'string') {
       return NextResponse.json(
         { error: 'Introduction text is required' },
@@ -16,7 +19,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { buffer, filename } = await generateTenderDocx(introductionText);
+    const { buffer, filename } = await generateTenderDocx(
+      introductionText,
+      typeof rawText === 'string' ? rawText : undefined
+    );
 
     const asciiFallback = 'tender.docx';
     const encodedFilename = encodeURIComponent(filename);

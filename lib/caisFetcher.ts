@@ -15,7 +15,7 @@ const CAIS_ALLOWED_HOSTS = [
 ];
 
 const MAX_CONTENT_LENGTH = 2 * 1024 * 1024; // 2MB
-const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10MB per attachment
+const MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100MB per attachment
 const ATTACHMENT_FETCH_TIMEOUT_MS = 30000;
 
 function isValidCaisUrl(urlString: string): boolean {

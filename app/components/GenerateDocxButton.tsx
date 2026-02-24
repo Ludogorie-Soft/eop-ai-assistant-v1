@@ -4,9 +4,13 @@ import { useState } from 'react';
 
 interface GenerateDocxButtonProps {
   introductionText: string;
+  rawText?: string;
 }
 
-export function GenerateDocxButton({ introductionText }: GenerateDocxButtonProps) {
+export function GenerateDocxButton({
+  introductionText,
+  rawText,
+}: GenerateDocxButtonProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,10 +25,18 @@ export function GenerateDocxButton({ introductionText }: GenerateDocxButtonProps
       const res = await fetch('/api/generate-docx', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ introductionText }),
+        body: JSON.stringify({ introductionText, rawText: rawText ?? '' }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+        const text = await res.text();
+        let data: { error?: string } = {};
+        if (text) {
+          try {
+            data = JSON.parse(text) as { error?: string };
+          } catch {
+            data = {};
+          }
+        }
         throw new Error(data.error ?? 'Failed to generate DOCX');
       }
       const blob = await res.blob();

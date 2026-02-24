@@ -23,7 +23,7 @@ const CAIS_ALLOWED_HOSTS = [
   'app.eop.bg',
 ];
 
-const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100MB
 const PAGE_WAIT_MS = 8000;
 
 const PAGE_ERROR_PATTERNS = [

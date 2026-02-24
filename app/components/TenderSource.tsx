@@ -86,10 +86,19 @@ export function TenderSource({ rawText, onRawTextUpdate }: TenderSourceProps) {
         method: 'POST',
         body: formData,
       });
-      const data = await res.json();
+      const text = await res.text();
+      let data: { text?: string; error?: string } = {};
+      if (text) {
+        try {
+          data = JSON.parse(text) as { text?: string; error?: string };
+        } catch {
+          data = {};
+        }
+      }
       if (!res.ok) throw new Error(data.error ?? 'Failed to parse files');
       setUploadedFiles((prev) => [...prev, ...valid]);
-      onRawTextUpdate(rawText ? `${data.text}\n\n${rawText}` : data.text);
+      const newText = data.text ?? '';
+      onRawTextUpdate(rawText ? `${newText}\n\n${rawText}` : newText);
     } catch (err) {
       setUploadError(
         err instanceof Error ? err.message : 'Failed to parse files'
