@@ -70,6 +70,7 @@ export function Introduction({
         onChange={(e) => onIntroductionUpdate(e.target.value)}
         placeholder="Текстът на увода ще се появи след AI генериране или може да го въведете ръчно."
         className="mt-3 h-64 w-full resize-y rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-800 placeholder-neutral-400 focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500"
+        style={{ textAlign: 'justify' }}
       />
     </section>
   );
