@@ -183,6 +183,7 @@ export async function generateTenderDocx(
                   size: FONT_SIZE,
                 }),
               ],
+              alignment: AlignmentType.BOTH,
               spacing: { ...defaultSpacing, before: 0 },
             })
           );
@@ -197,6 +198,7 @@ export async function generateTenderDocx(
                 size: FONT_SIZE,
               }),
             ],
+            alignment: AlignmentType.BOTH,
             spacing: defaultSpacing,
           })
         );
@@ -246,6 +248,7 @@ export async function generateTenderDocx(
               size: FONT_SIZE,
             }),
           ],
+          alignment: AlignmentType.BOTH,
           spacing: { ...defaultSpacing, before: 0 },
         })
       );

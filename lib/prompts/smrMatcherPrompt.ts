@@ -14,7 +14,9 @@ RULES:
   - reasoning: short explanation string
 - Confidence scale: 0 = no match, 1–74 = weak/wrong match, 75–89 = good match, 90–100 = near-identical.
 
-CRITICAL — these are examples of NON-matches (do not match these):
+CRITICAL SEMANTIC DISTINCTIONS — these activities are DIFFERENT from each other. Do NOT cross-match them:
+- "Демонтаж на ОСП" means dismantling/removal of a road structure element (signs, barriers, lighting, etc.). It is NOT the same as "Фрезоване" (milling of asphalt). Do NOT match "Демонтаж на ОСП" to any milling, асфалт removal, or фрезоване template.
+- "Фрезоване технологично с цел осигуряване на минимални технологични дебелини" means precision milling to achieve minimum layer thickness. It is semantically DIFFERENT from a template that describes general removal or demolition by milling ("Отстраняване чрез фрезоване"). Only match if the template specifically describes precision milling for layer depth control.
 - "Ремонт на пукнатини" is NOT the same as "Фрезоване" — different work category entirely
 - "Демонтаж на ОСП" is NOT the same as "Полагане на асфалтобетон"
 - "Изкореняване на дървета" is NOT the same as any road paving operation

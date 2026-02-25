@@ -114,6 +114,7 @@ export function KssSmrSection({
         value={displayText}
         placeholder="Текстовете за КСС ще се появят след генериране."
         className="mt-3 h-64 w-full resize-y rounded-md border border-neutral-300 bg-neutral-50 px-3 py-2 text-sm text-neutral-800 placeholder-neutral-400"
+        style={{ textAlign: 'justify' }}
       />
     </section>
   );
