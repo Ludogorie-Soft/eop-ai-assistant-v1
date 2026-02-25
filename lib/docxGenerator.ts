@@ -9,6 +9,7 @@ import {
   Packer,
   Paragraph,
   TextRun,
+  ImageRun,
   HeadingLevel,
   AlignmentType,
   LineRuleType,
@@ -102,7 +103,8 @@ export type SmrResultForDocx = {
 export async function generateTenderDocx(
   introductionText: string | undefined,
   rawText?: string,
-  smrResults?: SmrResultForDocx[]
+  smrResults?: SmrResultForDocx[],
+  satelliteImage?: { data: Buffer; width: number; height: number }
 ): Promise<{ buffer: Buffer; filename: string }> {
   const paragraphs: Paragraph[] = [];
   const hasIntroduction = Boolean(introductionText?.trim());
@@ -124,6 +126,27 @@ export async function generateTenderDocx(
         spacing: { ...defaultSpacing, after: 400 },
       })
     );
+
+    if (satelliteImage) {
+      const maxWidth = 600;
+      const scale = Math.min(1, maxWidth / satelliteImage.width);
+      paragraphs.push(
+        new Paragraph({
+          children: [
+            new ImageRun({
+              type: 'png',
+              data: satelliteImage.data,
+              transformation: {
+                width: Math.round(satelliteImage.width * scale),
+                height: Math.round(satelliteImage.height * scale),
+              },
+            }),
+          ],
+          alignment: AlignmentType.CENTER,
+          spacing: { ...defaultSpacing, after: 400 },
+        })
+      );
+    }
 
     const blocks = (introductionText ?? '')
       .split(/\n\n+/)

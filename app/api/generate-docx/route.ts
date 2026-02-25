@@ -4,6 +4,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { generateTenderDocx, type SmrResultForDocx } from '@/lib/docxGenerator';
+import {
+  extractLocation,
+  fetchStreetViewImage,
+  STREET_VIEW_IMAGE_WIDTH,
+  STREET_VIEW_IMAGE_HEIGHT,
+} from '@/lib/satelliteImage';
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,10 +32,31 @@ export async function POST(request: NextRequest) {
       ? smrResults
       : undefined;
 
+    let satelliteImage: { data: Buffer; width: number; height: number } | undefined;
+    const hasApiKey = Boolean(process.env.GOOGLE_MAPS_API_KEY);
+    console.log('[generate-docx] GOOGLE_MAPS_API_KEY present:', hasApiKey);
+
+    if (hasIntroduction && hasApiKey) {
+      const location = extractLocation(introductionText!, rawText);
+      console.log('[generate-docx] Extracted location:', location);
+      if (location) {
+        const imgData = await fetchStreetViewImage(location);
+        console.log('[generate-docx] Street View image fetched:', imgData ? `${imgData.length} bytes` : 'null');
+        if (imgData) {
+          satelliteImage = {
+            data: imgData,
+            width: STREET_VIEW_IMAGE_WIDTH,
+            height: STREET_VIEW_IMAGE_HEIGHT,
+          };
+        }
+      }
+    }
+
     const { buffer, filename } = await generateTenderDocx(
       hasIntroduction ? introductionText : undefined,
       typeof rawText === 'string' ? rawText : undefined,
-      smr
+      smr,
+      satelliteImage
     );
 
     const asciiFallback = 'tender.docx';
