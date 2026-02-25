@@ -5,7 +5,7 @@
  * We detect tables with mammoth HTML and extract title from first <td>, body from content after </table> until next <table>.
  */
 
-import mammoth from 'mammoth';
+import mammoth from "mammoth";
 
 export type SmrTemplate = {
   title: string;
@@ -15,12 +15,12 @@ export type SmrTemplate = {
 /** Strip HTML tags and collapse whitespace to get plain text */
 function htmlToText(html: string): string {
   return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .trim();
 }
@@ -28,7 +28,7 @@ function htmlToText(html: string): string {
 /** Extract text from first <td> in a table HTML (position name, often bold/italic in docx) */
 function extractTitleFromTable(tableHtml: string): string {
   const firstTd = tableHtml.match(/<td[^>]*>([\s\S]*?)<\/td\s*>/i);
-  if (!firstTd) return '';
+  if (!firstTd) return "";
   return htmlToText(firstTd[1]);
 }
 
@@ -37,10 +37,14 @@ function extractTitleFromTable(tableHtml: string): string {
  * Returns list of { title, body } where title = first cell text, body = text between this table and next.
  */
 function splitByTables(html: string): Array<{ title: string; body: string }> {
-  const fullHtml = html.replace(/^\s+|\s+$/g, '');
+  const fullHtml = html.replace(/^\s+|\s+$/g, "");
   const blocks: Array<{ title: string; body: string }> = [];
   const tableRegex = /<table[^>]*>([\s\S]*?)<\/table\s*>/gi;
-  const tableMatches: Array<{ index: number; length: number; tableHtml: string }> = [];
+  const tableMatches: Array<{
+    index: number;
+    length: number;
+    tableHtml: string;
+  }> = [];
   let match: RegExpExecArray | null;
   while ((match = tableRegex.exec(fullHtml)) !== null) {
     tableMatches.push({
@@ -54,11 +58,19 @@ function splitByTables(html: string): Array<{ title: string; body: string }> {
     const title = extractTitleFromTable(tableMatches[i].tableHtml);
     if (!title || title.length < 3) continue;
 
+    // Skip section-header rows: ALL CAPS or contain no lowercase letters (e.g. "ПОДГОТВИТЕЛНИ И ЗЕМНИ РАБОТИ")
+    const stripped = title.replace(/[\s\d.,;:()\-–—\/]/g, "");
+    const hasLower = /[а-яa-z]/.test(stripped);
+    if (!hasLower && stripped.length > 0) continue;
+
     const afterTableStart = tableMatches[i].index + tableMatches[i].length;
     const bodyEnd =
       i + 1 < tableMatches.length ? tableMatches[i + 1].index : fullHtml.length;
     const bodyHtml = fullHtml.slice(afterTableStart, bodyEnd);
     const body = htmlToText(bodyHtml);
+
+    // Skip entries with no meaningful body (likely header/separator tables)
+    if (body.trim().length < 20) continue;
 
     blocks.push({ title: title.trim(), body: body.trim() });
   }
@@ -70,9 +82,11 @@ function splitByTables(html: string): Array<{ title: string; body: string }> {
  * Parse SMR template DOCX buffer.
  * Each position = one table (first cell = title). Body = text under the table until the next table.
  */
-export async function parseSmrTemplateDocx(buffer: Buffer): Promise<SmrTemplate[]> {
+export async function parseSmrTemplateDocx(
+  buffer: Buffer,
+): Promise<SmrTemplate[]> {
   const result = await mammoth.convertToHtml({ buffer });
-  const html = result.value ?? '';
+  const html = result.value ?? "";
 
   const blocks = splitByTables(html);
 

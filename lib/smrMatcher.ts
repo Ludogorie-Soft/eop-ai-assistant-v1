@@ -4,13 +4,13 @@
  * Server-side only. Deterministic (temperature 0).
  */
 
-import { ChatPromptTemplate } from '@langchain/core/prompts';
-import { createLLM } from './langchainClient';
-import type { SmrTemplate } from './smrTemplateParser';
+import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { createLLM } from "./langchainClient";
+import type { SmrTemplate } from "./smrTemplateParser";
 import {
   SMR_MATCHER_SYSTEM_PROMPT,
   SMR_MATCHER_USER_PROMPT_TEMPLATE,
-} from './prompts/smrMatcherPrompt';
+} from "./prompts/smrMatcherPrompt";
 
 export type MatchResult = {
   text: string;
@@ -30,12 +30,17 @@ function parseLlmJson(content: string): LlmMatch | null {
   if (!jsonMatch) return null;
   try {
     const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
-    const matchedTitle = typeof parsed.matchedTitle === 'string' ? parsed.matchedTitle : '';
+    const matchedTitle =
+      typeof parsed.matchedTitle === "string" ? parsed.matchedTitle : "";
     const confidence =
-      typeof parsed.confidence === 'number'
+      typeof parsed.confidence === "number"
         ? Math.min(100, Math.max(0, parsed.confidence))
         : 0;
-    return { matchedTitle, confidence, reasoning: String(parsed.reasoning ?? '') };
+    return {
+      matchedTitle,
+      confidence,
+      reasoning: String(parsed.reasoning ?? ""),
+    };
   } catch {
     return null;
   }
@@ -43,21 +48,22 @@ function parseLlmJson(content: string): LlmMatch | null {
 
 /**
  * Find best matching SMR template for a single KSS position name.
- * If confidence < 60, returns text "[не е намерен]"; otherwise returns the body of the matched template.
+ * If confidence < 75 or matchedTitle is "NONE", returns text "[не е намерен]";
+ * otherwise returns the body of the matched template.
  */
 export async function matchKssToSmr(
   kssName: string,
-  smrTemplates: SmrTemplate[]
+  smrTemplates: SmrTemplate[],
 ): Promise<MatchResult> {
   if (!kssName.trim()) {
-    return { text: '[не е намерен]', confidence: 0, matchedTitle: null };
+    return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
   }
   if (smrTemplates.length === 0) {
-    return { text: '[не е намерен]', confidence: 0, matchedTitle: null };
+    return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
   }
 
   const titles = smrTemplates.map((t) => t.title);
-  const smrTitlesList = titles.map((t, i) => `${i + 1}. ${t}`).join('\n');
+  const smrTitlesList = titles.map((t, i) => `${i + 1}. ${t}`).join("\n");
 
   const llm = createLLM({
     temperature: 0,
@@ -65,8 +71,8 @@ export async function matchKssToSmr(
   });
 
   const prompt = ChatPromptTemplate.fromMessages([
-    ['system', SMR_MATCHER_SYSTEM_PROMPT],
-    ['human', SMR_MATCHER_USER_PROMPT_TEMPLATE],
+    ["system", SMR_MATCHER_SYSTEM_PROMPT],
+    ["human", SMR_MATCHER_USER_PROMPT_TEMPLATE],
   ]);
 
   const chain = prompt.pipe(llm);
@@ -76,30 +82,36 @@ export async function matchKssToSmr(
   });
 
   const content = response.content;
-  const raw = typeof content === 'string' ? content : '';
+  const raw = typeof content === "string" ? content : "";
   const parsed = parseLlmJson(raw);
 
   if (!parsed) {
-    return { text: '[не е намерен]', confidence: 0, matchedTitle: null };
+    return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
   }
 
-  const template = smrTemplates.find(
-    (t) => t.title.trim().toLowerCase() === parsed.matchedTitle.trim().toLowerCase()
-  );
   const confidence = parsed.confidence;
+  const isNoneMatch =
+    parsed.matchedTitle.trim().toUpperCase() === "NONE" ||
+    parsed.matchedTitle.trim() === "";
 
-  if (confidence < 60) {
+  // Reject if LLM returned NONE or confidence is below threshold
+  if (isNoneMatch || confidence < 75) {
     return {
-      text: '[не е намерен]',
-      confidence,
-      matchedTitle: parsed.matchedTitle || null,
+      text: "[не е намерен]",
+      confidence: isNoneMatch ? 0 : confidence,
+      matchedTitle: null,
     };
   }
 
-  const body = template?.body ?? '[не е намерен]';
+  const template = smrTemplates.find(
+    (t) =>
+      t.title.trim().toLowerCase() === parsed.matchedTitle.trim().toLowerCase(),
+  );
+
+  const body = template?.body ?? "[не е намерен]";
   return {
     text: body,
     confidence,
-    matchedTitle: template ? template.title : (parsed.matchedTitle || null),
+    matchedTitle: template ? template.title : parsed.matchedTitle || null,
   };
 }

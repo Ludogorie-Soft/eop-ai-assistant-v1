@@ -3,7 +3,7 @@
  * Uses xlsx for parsing. Server-side only.
  */
 
-import * as XLSX from 'xlsx';
+import * as XLSX from "xlsx";
 
 export type KssItem = {
   code: string;
@@ -14,31 +14,28 @@ export type KssItem = {
 
 /** Default column mapping (code, name, unit, quantity). Adjust if your Excel uses different headers. */
 const DEFAULT_HEADERS = {
-  code: ['код', 'code', '№', 'номер', 'поз'],
+  code: ["код", "code", "№", "номер", "поз"],
   name: [
-    'наименование на видовете работи',
-    'наименование',
-    'name',
-    'описание',
-    'описание на позиция',
+    "наименование на видовете работи",
+    "наименование",
+    "name",
+    "описание",
+    "описание на позиция",
   ],
-  unit: ['м.е.', 'ед.', 'единица', 'unit', 'measure'],
-  quantity: ['количество', 'quantity', 'кол'],
+  unit: ["м.е.", "ед.", "единица", "unit", "measure"],
+  quantity: ["количество", "quantity", "кол"],
 };
 
-function findColumnIndex(
-  row: unknown[],
-  aliases: string[]
-): number {
+function findColumnIndex(row: unknown[], aliases: string[]): number {
   const normalized = (v: unknown) =>
-    String(v ?? '')
+    String(v ?? "")
       .toLowerCase()
       .trim()
-      .replace(/\s+/g, ' ');
+      .replace(/\s+/g, " ");
   const rowStr = row.map(normalized);
   for (const alias of aliases) {
-    const idx = rowStr.findIndex((cell) =>
-      cell.includes(alias) || alias.includes(cell)
+    const idx = rowStr.findIndex(
+      (cell) => cell.includes(alias) || alias.includes(cell),
     );
     if (idx >= 0) return idx;
   }
@@ -47,14 +44,14 @@ function findColumnIndex(
 
 function safeNumber(value: unknown): number {
   if (value === null || value === undefined) return 0;
-  if (typeof value === 'number' && !Number.isNaN(value)) return value;
-  const s = String(value).replace(/\s/g, '').replace(',', '.');
+  if (typeof value === "number" && !Number.isNaN(value)) return value;
+  const s = String(value).replace(/\s/g, "").replace(",", ".");
   const n = parseFloat(s);
   return Number.isNaN(n) ? 0 : n;
 }
 
 function safeString(value: unknown): string {
-  if (value === null || value === undefined) return '';
+  if (value === null || value === undefined) return "";
   return String(value).trim();
 }
 
@@ -66,17 +63,42 @@ function isCategoryRow(code: string, name: string): boolean {
 }
 
 /**
+ * True if the row is actually a repeated/duplicated column-header row inside the data.
+ * Happens when Excel sheets repeat the header mid-table. These rows must be skipped.
+ * Checks whether the name cell matches any known name-column header alias.
+ */
+function isDataHeaderRow(name: string, code: string): boolean {
+  const nameLower = name.toLowerCase().trim().replace(/\s+/g, " ");
+  const codeLower = code.toLowerCase().trim().replace(/\s+/g, " ");
+  // If the "name" cell matches any of the name-column header aliases, it's a header row
+  for (const alias of DEFAULT_HEADERS.name) {
+    if (
+      nameLower === alias ||
+      nameLower.includes(alias) ||
+      alias.includes(nameLower)
+    ) {
+      if (nameLower.length > 3) return true; // guard against overly short coincidences
+    }
+  }
+  // If the "code" cell matches any of the code-column header aliases, it's a header row
+  for (const alias of DEFAULT_HEADERS.code) {
+    if (codeLower === alias) return true;
+  }
+  return false;
+}
+
+/**
  * Parse KSS Excel buffer and return normalized KssItem[].
  * Expects first row to be headers. Uses heuristics to find code, name, unit, quantity columns.
  */
 export function parseKssExcel(buffer: Buffer): KssItem[] {
-  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet) return [];
 
   const data = XLSX.utils.sheet_to_json(sheet, {
     header: 1,
-    defval: '',
+    defval: "",
     raw: false,
   }) as unknown[][];
 
@@ -105,10 +127,11 @@ export function parseKssExcel(buffer: Buffer): KssItem[] {
 
     if (!name && !code) continue;
     if (isCategoryRow(code, name)) continue;
+    if (isDataHeaderRow(name, code)) continue;
     items.push({
       code: code || `Поз.${i}`,
-      name: name || '(без име)',
-      unit: unit || 'бр.',
+      name: name || "(без име)",
+      unit: unit || "бр.",
       quantity,
     });
   }
