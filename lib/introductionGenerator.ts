@@ -8,6 +8,10 @@ import { createLLM } from './langchainClient';
 import {
   INTRODUCTION_SYSTEM_PROMPT,
   INTRODUCTION_USER_PROMPT_TEMPLATE,
+  CURRENT_STATE_SYSTEM_PROMPT,
+  CURRENT_STATE_USER_PROMPT_TEMPLATE,
+  PROJECT_SOLUTION_SYSTEM_PROMPT,
+  PROJECT_SOLUTION_USER_PROMPT_TEMPLATE,
 } from './prompts/introductionPrompt';
 
 export async function generateIntroduction(sourceText: string): Promise<string> {
@@ -35,6 +39,66 @@ export async function generateIntroduction(sourceText: string): Promise<string> 
   const content = response.content;
   if (typeof content !== 'string') {
     throw new Error('Unexpected response format from LLM');
+  }
+
+  let out = stripMarkdownBold(content.trim());
+  out = cleanIntroductionOutput(out);
+  return out;
+}
+
+export async function paraphraseCurrentState(rawCurrentState: string): Promise<string> {
+  if (!rawCurrentState?.trim()) {
+    return rawCurrentState;
+  }
+
+  const llm = createLLM({
+    temperature: 0.2,
+    maxTokens: 2048,
+  });
+
+  const prompt = ChatPromptTemplate.fromMessages([
+    ['system', CURRENT_STATE_SYSTEM_PROMPT],
+    ['human', CURRENT_STATE_USER_PROMPT_TEMPLATE],
+  ]);
+
+  const chain = prompt.pipe(llm);
+  const response = await chain.invoke({
+    currentState: rawCurrentState.slice(0, 40000),
+  });
+
+  const content = response.content;
+  if (typeof content !== 'string') {
+    return rawCurrentState;
+  }
+
+  let out = stripMarkdownBold(content.trim());
+  out = cleanIntroductionOutput(out);
+  return out;
+}
+
+export async function paraphraseProjectSolution(rawProjectSolution: string): Promise<string> {
+  if (!rawProjectSolution?.trim()) {
+    return rawProjectSolution;
+  }
+
+  const llm = createLLM({
+    temperature: 0.2,
+    maxTokens: 2048,
+  });
+
+  const prompt = ChatPromptTemplate.fromMessages([
+    ['system', PROJECT_SOLUTION_SYSTEM_PROMPT],
+    ['human', PROJECT_SOLUTION_USER_PROMPT_TEMPLATE],
+  ]);
+
+  const chain = prompt.pipe(llm);
+  const response = await chain.invoke({
+    projectSolution: rawProjectSolution.slice(0, 40000),
+  });
+
+  const content = response.content;
+  if (typeof content !== 'string') {
+    return rawProjectSolution;
   }
 
   let out = stripMarkdownBold(content.trim());
@@ -146,20 +210,6 @@ function extractKeyParamsFromDocumentation(body: string): string {
   );
   if (subjectMatch) {
     parts.push(`Предмет: ${subjectMatch[0].trim().slice(0, 1000)}`);
-  }
-
-  const budgetMatch = body.match(
-    /(?:прогнозна\s+стойност[\s\S]{0,100}?)([\d\s,.]+\s*(?:евро|лв\.|BGN|EUR)[^.\n]{0,200})/im
-  );
-  if (budgetMatch) {
-    parts.push(`Прогнозна стойност: ${budgetMatch[0].trim().slice(0, 500)}`);
-  }
-
-  const deadlineMatch = body.match(
-    /(?:срок\s+за\s+изпълнение[\s\S]{0,80}?)(\d+\s*\([^)]+\)\s*(?:календарни\s+)?дни)/im
-  );
-  if (deadlineMatch) {
-    parts.push(`Срок за изпълнение: ${deadlineMatch[1].trim()}`);
   }
 
   const criterionMatch = body.match(

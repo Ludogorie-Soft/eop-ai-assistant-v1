@@ -4,8 +4,12 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { generateIntroduction } from '@/lib/introductionGenerator';
-import { appendVerbatimSections } from '@/lib/verbatimSections';
+import {
+  generateIntroduction,
+  paraphraseCurrentState,
+  paraphraseProjectSolution,
+} from '@/lib/introductionGenerator';
+import { extractVerbatimSections, cleanVerbatimSection, buildFinalIntroduction } from '@/lib/verbatimSections';
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,9 +22,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const introduction = await generateIntroduction(sourceText);
-    const withVerbatim = appendVerbatimSections(introduction, sourceText);
-    return NextResponse.json({ introduction: withVerbatim });
+    const { currentState, projectSolution } = extractVerbatimSections(sourceText);
+
+    const [introduction, paraphrasedState, paraphrasedSolution] = await Promise.all([
+      generateIntroduction(sourceText),
+      currentState
+        ? paraphraseCurrentState(cleanVerbatimSection(currentState))
+        : Promise.resolve(null),
+      projectSolution
+        ? paraphraseProjectSolution(cleanVerbatimSection(projectSolution))
+        : Promise.resolve(null),
+    ]);
+
+    const result = buildFinalIntroduction(introduction, paraphrasedState, paraphrasedSolution);
+
+    return NextResponse.json({ introduction: result });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : 'Failed to generate introduction';

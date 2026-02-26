@@ -250,26 +250,38 @@ export function extractVerbatimSections(rawText: string): {
   return { currentState, projectSolution };
 }
 
-/** Append verbatim sections 4 and 5 to introduction text if found in raw text */
+/** Clean a raw verbatim section (strip boilerplate and KSS) */
+export function cleanVerbatimSection(raw: string): string {
+  let cleaned = stripBoilerplate(raw).trim();
+  cleaned = stripKssFromSection(cleaned);
+  return cleaned;
+}
+
+/** Build final introduction by combining AI-generated intro, verbatim section 4, and paraphrased section 5 */
+export function buildFinalIntroduction(
+  introductionText: string,
+  currentState: string | null,
+  paraphrasedProjectSolution: string | null,
+): string {
+  const parts = [introductionText.trim()];
+
+  if (currentState?.trim()) {
+    parts.push(`4. Текущо състояние\n\n${currentState}`);
+  }
+  if (paraphrasedProjectSolution?.trim()) {
+    parts.push(`5. Проектно решение\n\n${paraphrasedProjectSolution}`);
+  }
+
+  return parts.join('\n\n');
+}
+
+/** @deprecated Use buildFinalIntroduction with separate extraction and paraphrasing */
 export function appendVerbatimSections(
   introductionText: string,
   rawText: string
 ): string {
   const { currentState, projectSolution } = extractVerbatimSections(rawText);
-
-  const parts = [introductionText.trim()];
-
-  if (currentState?.trim()) {
-    let cleaned = stripBoilerplate(currentState).trim();
-    cleaned = stripKssFromSection(cleaned);
-    parts.push(`4. Текущо състояние\n\n${cleaned}`);
-  }
-  if (projectSolution?.trim()) {
-    let cleaned = stripBoilerplate(projectSolution).trim();
-    cleaned = stripKssFromSection(cleaned);
-    const withNewlines = cleaned.replace(/\s+(\d+)\.(\d+)\s+([А-ЯA-Z])/g, '\n\n$1.$2 $3');
-    parts.push(`5. Проектно решение\n\n${withNewlines}`);
-  }
-
-  return parts.join('\n\n');
+  const cleanedState = currentState ? cleanVerbatimSection(currentState) : null;
+  const cleanedSolution = projectSolution ? cleanVerbatimSection(projectSolution) : null;
+  return buildFinalIntroduction(introductionText, cleanedState, cleanedSolution);
 }
