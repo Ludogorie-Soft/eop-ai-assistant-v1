@@ -23,7 +23,7 @@ export async function generateIntroduction(sourceText: string): Promise<string> 
 
   const llm = createLLM({
     temperature: 0.2,
-    maxTokens: 4096,
+    maxTokens: 16384,
   });
 
   const prompt = ChatPromptTemplate.fromMessages([
@@ -53,7 +53,7 @@ export async function paraphraseCurrentState(rawCurrentState: string): Promise<s
 
   const llm = createLLM({
     temperature: 0.2,
-    maxTokens: 2048,
+    maxTokens: 16384,
   });
 
   const prompt = ChatPromptTemplate.fromMessages([
@@ -83,7 +83,7 @@ export async function paraphraseProjectSolution(rawProjectSolution: string): Pro
 
   const llm = createLLM({
     temperature: 0.2,
-    maxTokens: 2048,
+    maxTokens: 16384,
   });
 
   const prompt = ChatPromptTemplate.fromMessages([
