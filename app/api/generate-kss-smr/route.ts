@@ -1,17 +1,15 @@
 /**
  * KSS → SMR generation API.
- * POST multipart: kssFile (Excel) only. SMR template is read from project root: "Шаблони СМР.docx".
+ * POST multipart: kssFile (Excel) only.
+ * SMR template is fetched from Supabase Storage (smr-templates bucket).
  * Returns { results: SmrResult[] }.
  */
 
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseKssExcel } from '@/lib/kssParser';
 import { parseSmrTemplateDocx } from '@/lib/smrTemplateParser';
 import { generateSmrTextsForKss } from '@/lib/kssSmrGenerator';
-
-const SMR_TEMPLATE_FILENAME = 'Шаблони СМР.docx';
+import { downloadLatestTemplate } from '@/lib/templateStorage';
 
 const EXCEL_TYPES = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -61,16 +59,22 @@ export async function POST(request: NextRequest) {
 
     const kssItems = allKssItems;
 
-    const templatePath = join(process.cwd(), SMR_TEMPLATE_FILENAME);
-    let docxBuf: Buffer;
+    let docxBuf: Buffer | null = null;
+
     try {
-      docxBuf = await readFile(templatePath);
-    } catch {
+      docxBuf = await downloadLatestTemplate();
+    } catch (err) {
+      console.error('[generate-kss-smr] Supabase template fetch failed:', err);
+    }
+
+    if (!docxBuf) {
       return NextResponse.json(
-        { error: `Шаблонът "${SMR_TEMPLATE_FILENAME}" не е намерен в корена на проекта. Добавете файла там.` },
+        { error: 'Няма качен шаблон СМР в Supabase. Качете шаблон от страница „Шаблони СМР".' },
         { status: 400 }
       );
     }
+
+    console.log('[generate-kss-smr] Using SMR template from Supabase Storage');
 
     const smrTemplates = await parseSmrTemplateDocx(docxBuf);
     if (smrTemplates.length === 0) {
