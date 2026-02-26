@@ -1,5 +1,5 @@
-import { HomePage } from '@/app/components/HomePage';
+import { TenderListPage } from '@/app/components/TenderListPage';
 
 export default function Page() {
-  return <HomePage />;
+  return <TenderListPage />;
 }

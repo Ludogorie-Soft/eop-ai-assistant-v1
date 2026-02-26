@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
     const filename = path.replace(/^\d{4}-\d{2}-\d{2}_/, '');
 
-    return new NextResponse(buffer, {
+    return new NextResponse(buffer as unknown as BodyInit, {
       headers: {
         'Content-Type': DOCX_MIME,
         'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,

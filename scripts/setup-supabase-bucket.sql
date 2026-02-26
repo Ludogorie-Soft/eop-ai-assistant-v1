@@ -1,6 +1,0 @@
--- Supabase Storage bucket for tender documents
--- Create via Dashboard: Storage → New bucket
---   Name: tender-documents
---   Public: No 
---   File size limit: 100 MB (or as needed)
---   Allowed MIME types: application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/msword

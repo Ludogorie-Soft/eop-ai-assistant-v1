@@ -7,12 +7,14 @@ interface GenerateDocxButtonProps {
   introductionText: string;
   rawText?: string;
   smrResults?: SmrResult[];
+  onAfterExport?: () => void;
 }
 
 export function GenerateDocxButton({
   introductionText,
   rawText,
   smrResults = [],
+  onAfterExport,
 }: GenerateDocxButtonProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +66,7 @@ export function GenerateDocxButton({
       a.download = filename.endsWith('.docx') ? filename : `${filename}.docx`;
       a.click();
       URL.revokeObjectURL(url);
+      onAfterExport?.();
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Грешка при генериране на DOCX'
