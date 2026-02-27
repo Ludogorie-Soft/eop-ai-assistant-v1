@@ -237,21 +237,17 @@ function TemplateSection({
   );
 }
 
-const REQUIRED_PIN = process.env.NEXT_PUBLIC_TEMPLATES_PIN;
+const REQUIRED_PIN = process.env.NEXT_PUBLIC_TEMPLATES_PIN?.trim() || null;
+const PIN_NOT_CONFIGURED = !REQUIRED_PIN;
 
 export default function AdminTemplatesPage() {
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
-  const [authorized, setAuthorized] = useState(() => {
-    return !REQUIRED_PIN;
-  });
+  const [authorized, setAuthorized] = useState(false);
 
   const handlePinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!REQUIRED_PIN) {
-      setAuthorized(true);
-      return;
-    }
+    if (PIN_NOT_CONFIGURED) return;
     if (pinInput.trim() === REQUIRED_PIN) {
       setAuthorized(true);
       setPinError(null);
@@ -288,27 +284,41 @@ export default function AdminTemplatesPage() {
             <h2 className="text-lg font-semibold text-neutral-800">
               Достъп до шаблоните
             </h2>
-            <p className="mt-1 text-sm text-neutral-600">
-              Въведете ПИН, за да управлявате СМР и екипни шаблони.
-            </p>
-            <form onSubmit={handlePinSubmit} className="mt-4 space-y-3">
-              <input
-                type="password"
-                value={pinInput}
-                onChange={(e) => setPinInput(e.target.value)}
-                placeholder="ПИН"
-                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500"
-              />
-              {pinError && (
-                <p className="text-sm text-red-600">{pinError}</p>
-              )}
-              <button
-                type="submit"
-                className="w-full rounded-md bg-neutral-700 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
-              >
-                Вход
-              </button>
-            </form>
+            {PIN_NOT_CONFIGURED ? (
+              <div className="mt-4 rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <p>
+                  ПИНът не е конфигуриран. Добавете{" "}
+                  <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">
+                    NEXT_PUBLIC_TEMPLATES_PIN
+                  </code>{" "}
+                  в .env файла и рестартирайте приложението, за да активирате достъпа.
+                </p>
+              </div>
+            ) : (
+              <>
+                <p className="mt-1 text-sm text-neutral-600">
+                  Въведете ПИН, за да управлявате СМР и екипни шаблони.
+                </p>
+                <form onSubmit={handlePinSubmit} className="mt-4 space-y-3">
+                  <input
+                    type="password"
+                    value={pinInput}
+                    onChange={(e) => setPinInput(e.target.value)}
+                    placeholder="ПИН"
+                    className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500"
+                  />
+                  {pinError && (
+                    <p className="text-sm text-red-600">{pinError}</p>
+                  )}
+                  <button
+                    type="submit"
+                    className="w-full rounded-md bg-neutral-700 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+                  >
+                    Вход
+                  </button>
+                </form>
+              </>
+            )}
           </section>
         ) : (
           <>
