@@ -14,6 +14,7 @@ import {
   AlignmentType,
   LineRuleType,
 } from "docx";
+import { htmlToDocxElements } from "./htmlToDocxBody";
 
 const FONT = "Times New Roman";
 const FONT_SIZE = 22; // 11pt in half-points
@@ -104,6 +105,7 @@ export type SmrResultForDocx = {
   matchedTitle: string | null;
   text: string;
   confidence: number;
+  htmlBody?: string;
 };
 
 export async function generateTenderDocx(
@@ -251,19 +253,30 @@ export async function generateTenderDocx(
           spacing: { ...defaultSpacing, after: 0, before: 200 },
         }),
       );
-      paragraphs.push(
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: r.text,
-              font: FONT,
-              size: FONT_SIZE,
+      if (r.htmlBody) {
+        // Use rich HTML body: preserves bold, italic, bullet lists, and images from the SMR template
+        const richElements = htmlToDocxElements(r.htmlBody);
+        if (richElements.length > 0) {
+          paragraphs.push(...richElements);
+        } else {
+          // Fallback to plain text if HTML parsing yielded nothing
+          paragraphs.push(
+            new Paragraph({
+              children: [new TextRun({ text: r.text, font: FONT, size: FONT_SIZE })],
+              alignment: AlignmentType.BOTH,
+              spacing: { ...defaultSpacing, before: 0 },
             }),
-          ],
-          alignment: AlignmentType.BOTH,
-          spacing: { ...defaultSpacing, before: 0 },
-        }),
-      );
+          );
+        }
+      } else {
+        paragraphs.push(
+          new Paragraph({
+            children: [new TextRun({ text: r.text, font: FONT, size: FONT_SIZE })],
+            alignment: AlignmentType.BOTH,
+            spacing: { ...defaultSpacing, before: 0 },
+          }),
+        );
+      }
     }
   }
 

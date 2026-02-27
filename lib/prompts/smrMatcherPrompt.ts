@@ -15,12 +15,29 @@ RULES:
 - Confidence scale: 0 = no match, 1–74 = weak/wrong match, 75–89 = good match, 90–100 = near-identical.
 
 CRITICAL SEMANTIC DISTINCTIONS — these activities are DIFFERENT from each other. Do NOT cross-match them:
-- "Демонтаж на ОСП" means dismantling/removal of a road structure element (signs, barriers, lighting, etc.). It is NOT the same as "Фрезоване" (milling of asphalt). Do NOT match "Демонтаж на ОСП" to any milling, асфалт removal, or фрезоване template.
-- "Фрезоване технологично с цел осигуряване на минимални технологични дебелини" means precision milling to achieve minimum layer thickness. It is semantically DIFFERENT from a template that describes general removal or demolition by milling ("Отстраняване чрез фрезоване"). Only match if the template specifically describes precision milling for layer depth control.
-- "Ремонт на пукнатини" is NOT the same as "Фрезоване" — different work category entirely
-- "Демонтаж на ОСП" is NOT the same as "Полагане на асфалтобетон"
-- "Изкореняване на дървета" is NOT the same as any road paving operation
-- "Наименование на видовете работи" is a table column header — always return NONE for it
+
+ASPHALT LAYER TYPES — each layer type is its own distinct work category:
+- "Износващ пласт" = wearing/surface course (top layer). Match only to a template that explicitly says "износващ пласт" or "surface course".
+- "Свързващ пласт" / "биндер" / "бинде пласт" = binder course (intermediate layer). Match only to a template explicitly about "свързващ пласт" or "биндер". Do NOT match to a "износващ пласт" or "основен пласт" template.
+- "Основен пласт" / "долен пласт" = base course (bottom layer). Different from both износващ and свързващ.
+- "Доставка и полагане на асфалтова смес за свързващ пласт /биндер/" → must match a template about "свързващ пласт" or "биндер", NOT one about "износващ пласт".
+
+MILLING (ФРЕЗОВАНЕ) TYPES — distinguish by purpose:
+- "Фрезоване технологично с цел осигуряване на минимални технологични дебелини на изравнителните пластове" = precision milling so that NEW leveling layers will meet minimum thickness requirements. The purpose is ensuring NEW paving layers are thick enough. This is STRICTLY DIFFERENT from removing an existing layer. If no template title mentions "технологич" or "минимал" + "дебелин", return NONE.
+- "Отстраняване (фрезоване) на съществуващия горен слой" = full removal of the EXISTING top layer. Different operation from precision milling for new layers.
+- Do NOT match "технологично фрезоване с минимални дебелини" to any "Отстраняване" template — they describe opposing purposes (creating space for new layers vs. removing old ones).
+
+ROAD BASE vs. ASPHALT SURFACE — completely different materials and work:
+- "Разваляне на пътна основа / пътно покритие, включително изкопаване, натоварване, транспортиране, разтоварване на депо" = demolishing/breaking up the ROAD BASE (foundation layer beneath asphalt). This is earthworks/demolition. It is NOT asphalt surface removal. Do NOT match to any "асфалтобетонова настилка" template.
+- "Асфалтобетонова настилка" = asphalt concrete surface. Completely different from "пътна основа" (road foundation/base).
+- A KSS item that says "Разваляне на пътна основа" combined with "изкопаване, натоварване, транспортиране, депо" describes earthwork demolition → return NONE if no template matches this earthworks category.
+
+OTHER DISTINCTIONS:
+- "Демонтаж на ОСП" means dismantling/removal of a road structure element (signs, barriers, lighting). It is NOT milling. Do NOT match to any фрезоване or асфалт template.
+- "Ремонт на пукнатини" is crack repair — NOT the same as "Фрезоване".
+- "Изкореняване на дървета" is tree removal — NOT any road paving operation.
+- "Наименование на видовете работи" is a table column header — always return NONE.
+- If the KSS name matches body text content (not a template title), return NONE. Only match against the provided title list.
 
 When in doubt, return NONE with confidence 0. It is better to return NONE than to return a wrong match.`;
 

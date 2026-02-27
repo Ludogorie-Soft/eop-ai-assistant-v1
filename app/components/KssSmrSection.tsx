@@ -8,6 +8,7 @@ export type SmrResult = {
   matchedTitle: string | null;
   text: string;
   confidence: number;
+  htmlBody?: string;
 };
 
 interface KssSmrSectionProps {
@@ -31,6 +32,7 @@ export function KssSmrSection({
 }: KssSmrSectionProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const kssInputRef = useRef<HTMLInputElement>(null);
 
   const handleGenerate = async () => {
@@ -47,6 +49,7 @@ export function KssSmrSection({
 
     setLoading(true);
     setError(null);
+    setWarning(null);
     try {
       const formData = new FormData();
       for (const file of kssFiles) {
@@ -60,12 +63,14 @@ export function KssSmrSection({
       const data = (await res.json().catch(() => ({}))) as {
         results?: SmrResult[];
         error?: string;
+        warning?: string;
       };
 
       if (!res.ok) {
         throw new Error(data.error ?? "Грешка при генериране");
       }
       onSmrResultsUpdate(data.results ?? []);
+      if (data.warning) setWarning(data.warning);
     } catch (err) {
       setError(
         err instanceof Error
@@ -115,6 +120,11 @@ export function KssSmrSection({
       </div>
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {warning && (
+        <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {warning}
+        </p>
+      )}
 
       <textarea
         readOnly

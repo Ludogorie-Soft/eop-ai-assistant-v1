@@ -11,6 +11,8 @@ import { parseTeamTemplateDocx, type TeamPosition } from './teamTemplateParser';
 import {
   TEAM_MATCHER_SYSTEM_PROMPT,
   TEAM_MATCHER_USER_PROMPT_TEMPLATE,
+  TEAM_REVERSE_MATCHER_SYSTEM_PROMPT,
+  TEAM_REVERSE_MATCHER_USER_PROMPT_TEMPLATE,
   TEAM_PARAPHRASER_SYSTEM_PROMPT,
   TEAM_PARAPHRASER_USER_PROMPT_TEMPLATE,
 } from './prompts/teamPrompt';
@@ -18,6 +20,12 @@ import {
 interface PositionMatch {
   docPosition: string;
   matchedTemplate: string;
+  confidence: number;
+}
+
+interface ReverseMatch {
+  templateTitle: string;
+  matchedDocPosition: string;
   confidence: number;
 }
 
@@ -74,6 +82,52 @@ async function matchPositions(
   return parseMatcherJson(content);
 }
 
+function parseReverseMatcherJson(content: string): ReverseMatch[] {
+  const trimmed = content.trim();
+  const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) return [];
+  try {
+    const parsed = JSON.parse(jsonMatch[0]) as unknown[];
+    return parsed
+      .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+      .map((item) => ({
+        templateTitle: String((item as any).templateTitle ?? ''),
+        matchedDocPosition: String((item as any).matchedDocPosition ?? 'NONE'),
+        confidence: typeof (item as any).confidence === 'number' ? (item as any).confidence : 0,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/** For each template position, find the closest doc position (to use its requirements for paraphrasing) */
+async function matchTemplateToDoc(
+  templatePositions: TeamPosition[],
+  docPositions: RequiredPosition[],
+): Promise<ReverseMatch[]> {
+  const llm = createLLM({ temperature: 0, maxTokens: 2048 });
+  const prompt = ChatPromptTemplate.fromMessages([
+    ['system', TEAM_REVERSE_MATCHER_SYSTEM_PROMPT],
+    ['human', TEAM_REVERSE_MATCHER_USER_PROMPT_TEMPLATE],
+  ]);
+
+  const templateList = templatePositions
+    .map((p, i) => `${i + 1}. ${p.title}`)
+    .join('\n');
+  const docListWithReqs = docPositions
+    .map((p, i) => `${i + 1}. ${p.name}\n   Изисквания: ${(p.requirements || '').slice(0, 200).trim() || '-'}`)
+    .join('\n\n');
+
+  const chain = prompt.pipe(llm);
+  const response = await chain.invoke({
+    templatePositions: templateList,
+    docPositionsWithRequirements: docListWithReqs,
+  });
+
+  const content = typeof response.content === 'string' ? response.content : '';
+  return parseReverseMatcherJson(content);
+}
+
 async function paraphrasePosition(
   positionName: string,
   requirements: string,
@@ -128,7 +182,10 @@ export async function generateTeamOrganization(
     );
   }
 
-  const matches = await matchPositions(docPositions, templatePositions);
+  const [matches, reverseMatches] = await Promise.all([
+    matchPositions(docPositions, templatePositions),
+    matchTemplateToDoc(templatePositions, docPositions),
+  ]);
 
   const kssContext = kssNames?.length
     ? kssNames.slice(0, 100).join(', ')
@@ -137,7 +194,8 @@ export async function generateTeamOrganization(
   const results: TeamOrganizationResult[] = [];
   const usedTemplateTitles = new Set<string>();
 
-  // 1) Първо – длъжностите, изискани от документацията (в реда на документацията)
+  // 1) Първо – длъжностите, изискани от документацията (в реда на документацията).
+  // Винаги използваме най-близкия шаблон – дори при по-ниска увереност.
   const primaryResults = await Promise.all(
     docPositions.map(async (docPos) => {
       const match = matches.find(
@@ -145,7 +203,7 @@ export async function generateTeamOrganization(
       );
 
       const templatePos =
-        match && match.matchedTemplate !== 'NONE' && match.confidence >= 50
+        match && match.matchedTemplate !== 'NONE'
           ? templatePositions.find(
               (t) => t.title.toLowerCase() === match.matchedTemplate.toLowerCase()
             )
@@ -176,25 +234,39 @@ export async function generateTeamOrganization(
     if (res) results.push(res);
   }
 
-  // 2) После – всички останали длъжности от шаблона, които не са били
-  // изрично изискани в документацията (в реда на шаблона).
+  // 2) После – всички останали длъжности от шаблона. За всяка намираме най-близката
+  // длъжност от документацията и използваме нейните изисквания (не празни).
   const secondaryResults = await Promise.all(
     templatePositions.map(async (tpl) => {
       if (usedTemplateTitles.has(tpl.title.toLowerCase())) return null;
 
+      const revMatch = reverseMatches.find(
+        (m) => m.templateTitle.toLowerCase() === tpl.title.toLowerCase()
+      );
+      const docPos =
+        revMatch &&
+        revMatch.matchedDocPosition !== 'NONE'
+          ? docPositions.find(
+              (d) =>
+                d.name.toLowerCase() === revMatch.matchedDocPosition.toLowerCase()
+            )
+          : null;
+
+      const requirements = docPos?.requirements ?? '';
+
       const text = await paraphrasePosition(
         tpl.title,
-        '',
+        requirements,
         tpl.body,
         kssContext,
       );
 
       return {
         positionName: tpl.title,
-        requirements: '',
+        requirements,
         templateTitle: tpl.title,
         text,
-        confidence: 0,
+        confidence: revMatch?.confidence ?? 0,
       } satisfies TeamOrganizationResult;
     })
   );

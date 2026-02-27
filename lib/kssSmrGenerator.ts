@@ -13,6 +13,7 @@ export type SmrResult = {
   matchedTitle: string | null;
   text: string;
   confidence: number;
+  htmlBody?: string;
 };
 
 /**
@@ -33,6 +34,7 @@ export async function generateSmrTextsForKss(
       matchedTitle: match.matchedTitle,
       text: match.text,
       confidence: match.confidence,
+      htmlBody: match.htmlBody,
     });
   }
 

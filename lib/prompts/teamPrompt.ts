@@ -1,7 +1,8 @@
 /**
  * Prompts for team organization generation:
  * 1. Position Matcher — matches documentation positions to template positions
- * 2. Position Paraphraser — paraphrases template text into structured output
+ * 2. Reverse Matcher — matches template positions to documentation (for finding closest doc position with requirements)
+ * 3. Position Paraphraser — paraphrases template text into structured output
  */
 
 export const TEAM_MATCHER_SYSTEM_PROMPT = `Ти си експерт по публични поръчки за строителство в България. Задачата ти е да съпоставиш длъжности от документация за участие с длъжности от шаблон.
@@ -22,6 +23,26 @@ export const TEAM_MATCHER_USER_PROMPT_TEMPLATE = `Длъжности от док
 {templatePositions}
 
 Съпостави всяка длъжност от документацията с най-подходящата от шаблона. Върни САМО JSON масив.`;
+
+/** Reverse match: for each template position, find the closest doc position (to use its requirements) */
+export const TEAM_REVERSE_MATCHER_SYSTEM_PROMPT = `Ти си експерт по публични поръчки за строителство в България. Задачата ти е да съпоставиш длъжности от шаблон с длъжности от документация за участие.
+
+ПРАВИЛА:
+1. За всяка длъжност от шаблона, намери НАЙ-БЛИЗКАТАТА съответстваща длъжност от документацията (изискванията й).
+2. Имената може да се различават леко – избери най-смислената комбинация (напр. "Ръководител на проекта" от шаблона ↔ "Ръководител обект" от документацията).
+3. ВИНАГИ задай някакво съвпадение – дори при слабо сходство избери най-близката длъжност от документацията. Ако наистина няма подобна, задай matchedDocPosition = "NONE" и confidence = 0.
+4. Върни САМО JSON масив (без обяснителен текст), където всеки елемент е обект със следните полета:
+   - templateTitle: точното име на длъжността от шаблона
+   - matchedDocPosition: точното име на най-близката длъжност от документацията или "NONE"
+   - confidence: цяло число от 0 до 100.`;
+
+export const TEAM_REVERSE_MATCHER_USER_PROMPT_TEMPLATE = `Длъжности от шаблона:
+{templatePositions}
+
+Длъжности от документацията (с изискванията им):
+{docPositionsWithRequirements}
+
+За всяка длъжност от шаблона намери НАЙ-БЛИЗКАТА от документацията. Върни САМО JSON масив.`;
 
 export const TEAM_PARAPHRASER_SYSTEM_PROMPT = `Ти си експерт по технически предложения за публични поръчки за строителство в България. Задачата ти е да преразкажеш описание на длъжност от шаблон, като го адаптираш за конкретна поръчка.
 

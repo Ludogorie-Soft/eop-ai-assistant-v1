@@ -11,6 +11,8 @@ import mammoth from "mammoth";
 export type SmrTemplate = {
   title: string;
   body: string;
+  /** Raw HTML from after the title table to before the next title table. Includes formatting and base64 images. */
+  htmlBody: string;
 };
 
 /** Strip HTML tags and collapse whitespace to get plain text */
@@ -35,8 +37,21 @@ function extractTitleFromTable(tableHtml: string): string {
 
 /** Determine if a table qualifies as a section title table (activity header) */
 function isTitleTable(tableHtml: string): boolean {
-  const title = extractTitleFromTable(tableHtml);
+  const firstTd = tableHtml.match(/<td[^>]*>([\s\S]*?)<\/td\s*>/i);
+  if (!firstTd) return false;
+  const tdContent = firstTd[1];
+
+  // Position title tables in "Шаблони СМР.docx" always have <strong> or <em> wrapping.
+  // Body content tables (data rows, resource tables) do NOT — they are plain text.
+  const hasBoldOrItalic = /<strong>|<em>/i.test(tdContent);
+  if (!hasBoldOrItalic) return false;
+
+  const title = htmlToText(tdContent);
   if (!title || title.length < 3) return false;
+
+  // Guard against accidentally matching long body-content tables
+  if (title.length > 220) return false;
+
   // Skip ALL-CAPS section headers (e.g. "ПОДГОТВИТЕЛНИ И ЗЕМНИ РАБОТИ")
   const stripped = title.replace(/[\s\d.,;:()\-–—\/]/g, "");
   const hasLower = /[а-яa-z]/.test(stripped);
@@ -48,9 +63,9 @@ function isTitleTable(tableHtml: string): boolean {
  * Body extends from after the title table to just before the NEXT title table,
  * so intermediate data tables (expert roles, etc.) are included as part of the body.
  */
-function splitByTables(html: string): Array<{ title: string; body: string }> {
+function splitByTables(html: string): Array<{ title: string; body: string; htmlBody: string }> {
   const fullHtml = html.replace(/^\s+|\s+$/g, "");
-  const blocks: Array<{ title: string; body: string }> = [];
+  const blocks: Array<{ title: string; body: string; htmlBody: string }> = [];
   const tableRegex = /<table[^>]*>([\s\S]*?)<\/table\s*>/gi;
   const tableMatches: Array<{
     index: number;
@@ -92,7 +107,7 @@ function splitByTables(html: string): Array<{ title: string; body: string }> {
     // Skip entries with no meaningful body (likely header/separator tables)
     if (body.trim().length < 20) continue;
 
-    blocks.push({ title: title!.trim(), body: body.trim() });
+    blocks.push({ title: title!.trim(), body: body.trim(), htmlBody: bodyHtml.trim() });
   }
 
   return blocks;
@@ -113,5 +128,6 @@ export async function parseSmrTemplateDocx(
   return blocks.map((b) => ({
     title: b.title,
     body: b.body,
+    htmlBody: b.htmlBody,
   }));
 }

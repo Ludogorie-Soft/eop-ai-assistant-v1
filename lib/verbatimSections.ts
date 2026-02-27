@@ -71,7 +71,7 @@ function stripBoilerplate(text: string): string {
     )
     .replace(/\n\s*Страница\s+\d+\s+от\s+\d+\s*\n/gi, '\n')
     .replace(
-      /\n\s*ОБЩИНА\s+КИРКОВО\s*\n\s*MUNICIPALITY\s+KIRKOVO\s*/gi,
+      /\n\s*ОБЩИНА\s+[А-ЯA-Zа-яa-z\s]+\s*\n\s*MUNICIPALITY\s+[A-Za-z\s]+\s*/gi,
       '\n'
     )
     .replace(PAGE_FOOTER_EMAIL, '')

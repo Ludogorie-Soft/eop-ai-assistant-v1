@@ -16,6 +16,7 @@ export type MatchResult = {
   text: string;
   confidence: number;
   matchedTitle: string | null;
+  htmlBody?: string;
 };
 
 type LlmMatch = {
@@ -103,6 +104,35 @@ export async function matchKssToSmr(
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Deterministic post-match guards — override LLM when known false positives occur
+  // ---------------------------------------------------------------------------
+  const kssLower = kssName.toLowerCase();
+  const matchedLower = parsed.matchedTitle.toLowerCase();
+
+  // "Технологично фрезоване с цел осигуряване на минимални технологични дебелини"
+  // must NEVER match any "Отстраняване (фрезоване)" template.
+  // The LLM confuses them because both mention "фрезоване", but they are opposite
+  // operations (creating space for NEW layers vs. removing OLD ones).
+  if (
+    kssLower.includes("технологич") &&
+    kssLower.includes("дебелин") &&
+    matchedLower.includes("отстраняв")
+  ) {
+    return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
+  }
+
+  // "Разваляне на пътна основа / пътно покритие, включително изкопаване, натоварване..."
+  // is road-base earthwork demolition — must NOT match asphalt surface templates.
+  if (
+    kssLower.includes("разваляне") &&
+    (kssLower.includes("пътна основа") || kssLower.includes("пътно покритие")) &&
+    (matchedLower.includes("асфалтобетон") || matchedLower.includes("настилка") ||
+      matchedLower.includes("фрезоване"))
+  ) {
+    return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
+  }
+
   const template = smrTemplates.find(
     (t) =>
       t.title.trim().toLowerCase() === parsed.matchedTitle.trim().toLowerCase(),
@@ -113,5 +143,6 @@ export async function matchKssToSmr(
     text: body,
     confidence,
     matchedTitle: template ? template.title : parsed.matchedTitle || null,
+    htmlBody: template?.htmlBody,
   };
 }

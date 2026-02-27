@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { parseKssExcel } from "@/lib/kssParser";
+import { parseKssExcel, type KssItem } from "@/lib/kssParser";
 import { parseSmrTemplateDocx } from "@/lib/smrTemplateParser";
 import { generateSmrTextsForKss } from "@/lib/kssSmrGenerator";
 import { downloadLatestTemplate } from "@/lib/templateStorage";
@@ -43,11 +43,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const allKssItems: ReturnType<typeof parseKssExcel> = [];
+    const allKssItems: KssItem[] = [];
+    let columnFallbackUsed = false;
     for (const file of kssFiles) {
       const buf = Buffer.from(await file.arrayBuffer());
-      const items = parseKssExcel(buf);
+      const { items, headersMatched } = parseKssExcel(buf);
       allKssItems.push(...items);
+      if (!headersMatched) columnFallbackUsed = true;
     }
 
     if (allKssItems.length === 0) {
@@ -92,7 +94,12 @@ export async function POST(request: NextRequest) {
 
     const results = await generateSmrTextsForKss(kssItems, smrTemplates);
 
-    return NextResponse.json({ results });
+    const response: { results: typeof results; warning?: string } = { results };
+    if (columnFallbackUsed) {
+      response.warning =
+        "Забележка: Колоните код, наименование, м.е. и количество не са намерени по заглавия. Използвани са първите 4 колони – проверете дали данните са коректни.";
+    }
+    return NextResponse.json(response);
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to generate KSS SMR texts";

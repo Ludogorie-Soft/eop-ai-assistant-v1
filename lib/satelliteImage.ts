@@ -18,6 +18,12 @@ function extractCity(text: string): string | null {
   if (m) return m[1].trim();
   const m2 = text.match(/община\s+([А-Яа-я]{2,25})/i);
   if (m2) return m2[1].trim();
+  // с. (село / village)
+  const m3 = text.match(/с\.\s+([А-Яа-я]{2,25})/i);
+  if (m3) return m3[1].trim();
+  // общ. (общини)
+  const m4 = text.match(/общ(?:ина)?\.?\s+([А-Яа-я]{2,25})/i);
+  if (m4) return m4[1].trim();
   return null;
 }
 
@@ -64,6 +70,35 @@ function findLocationIn(
     }
   }
 
+  // улица (full word, no abbreviation)
+  const streetFullQuoted = text.match(
+    new RegExp(`улица\\s+${Q}([^„""«»"\\n]{2,40})${Q}`, "i"),
+  );
+  if (streetFullQuoted) {
+    return { address: `ул. ${streetFullQuoted[1].replace(/\s+/g, " ").trim()}`, city };
+  }
+  const streetFullPlain = text.match(
+    /улица\s+([А-Яа-я]+(?:\s+[А-Яа-я]+){0,3})/i,
+  );
+  if (streetFullPlain) {
+    const name = trimStopWords(streetFullPlain[1].replace(/\s+/g, " ").trim());
+    if (name.length >= 2) return { address: `ул. ${name}`, city };
+  }
+
+  // автомагистрала / АМ (motorway)
+  const amMatch = text.match(
+    /(?:автомагистрала|АМ)\s+[„"«»"]?([А-Яа-яA-Za-z\s]{3,30}?)[„"«»"]?(?:\s*[,.]|\s+от\s+|\s+в\s+|$)/i,
+  );
+  if (amMatch) {
+    return { address: `АМ ${amMatch[1].replace(/\s+/g, " ").trim()}`, city };
+  }
+
+  // /I-1/, /II-61/, /III-806/ road codes (common in BG road tenders)
+  const roadCodeMatch = text.match(/\/([IV]+[-–]\d{1,3})\//);
+  if (roadCodeMatch) {
+    return { address: `Път ${roadCodeMatch[1]}`, city };
+  }
+
   // път / пътен участък (road)
   const roadMatch = text.match(
     /(?:път|пътен\s+участък)\s+([A-ZА-Яа-я\d\s–-]{3,40}?)(?:\s*[,.]|\s+от\s+|\s+в\s+)/i,
@@ -88,6 +123,22 @@ function findLocationIn(
       address: `бул. ${trimStopWords(blvdPlain[1].replace(/\s+/g, " ").trim())}`,
       city,
     };
+  }
+
+  // булевард (full word)
+  const blvdFullPlain = text.match(
+    /булевард\s+([А-Яа-я]+(?:\s+[А-Яа-я]+){0,3})/i,
+  );
+  if (blvdFullPlain) {
+    const name = trimStopWords(blvdFullPlain[1].replace(/\s+/g, " ").trim());
+    if (name.length >= 2) return { address: `бул. ${name}`, city };
+  }
+
+  // кв. (квартал / district)
+  const kvMatch = text.match(/кв(?:артал)?\.\s+([А-Яа-я]+(?:\s+[А-Яа-я]+){0,2})/i);
+  if (kvMatch) {
+    const name = trimStopWords(kvMatch[1].replace(/\s+/g, " ").trim());
+    if (name.length >= 2) return { address: `кв. ${name}`, city };
   }
 
   // Only city found
