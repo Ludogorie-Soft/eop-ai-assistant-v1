@@ -135,33 +135,72 @@ export async function generateTeamOrganization(
     : '';
 
   const results: TeamOrganizationResult[] = [];
+  const usedTemplateTitles = new Set<string>();
 
-  for (const docPos of docPositions) {
-    const match = matches.find(
-      (m) => m.docPosition.toLowerCase() === docPos.name.toLowerCase()
-    );
+  // 1) Първо – длъжностите, изискани от документацията (в реда на документацията)
+  const primaryResults = await Promise.all(
+    docPositions.map(async (docPos) => {
+      const match = matches.find(
+        (m) => m.docPosition.toLowerCase() === docPos.name.toLowerCase()
+      );
 
-    const templatePos = match && match.matchedTemplate !== 'NONE' && match.confidence >= 50
-      ? templatePositions.find(
-          (t) => t.title.toLowerCase() === match.matchedTemplate.toLowerCase()
-        )
-      : null;
+      const templatePos =
+        match && match.matchedTemplate !== 'NONE' && match.confidence >= 50
+          ? templatePositions.find(
+              (t) => t.title.toLowerCase() === match.matchedTemplate.toLowerCase()
+            )
+          : null;
 
-    if (templatePos) {
+      if (!templatePos) return null;
+
       const text = await paraphrasePosition(
         docPos.name,
         docPos.requirements,
         templatePos.body,
         kssContext,
       );
-      results.push({
+
+      usedTemplateTitles.add(templatePos.title.toLowerCase());
+
+      return {
         positionName: docPos.name,
         requirements: docPos.requirements,
         templateTitle: templatePos.title,
         text,
         confidence: match!.confidence,
-      });
-    }
+      } satisfies TeamOrganizationResult;
+    })
+  );
+
+  for (const res of primaryResults) {
+    if (res) results.push(res);
+  }
+
+  // 2) После – всички останали длъжности от шаблона, които не са били
+  // изрично изискани в документацията (в реда на шаблона).
+  const secondaryResults = await Promise.all(
+    templatePositions.map(async (tpl) => {
+      if (usedTemplateTitles.has(tpl.title.toLowerCase())) return null;
+
+      const text = await paraphrasePosition(
+        tpl.title,
+        '',
+        tpl.body,
+        kssContext,
+      );
+
+      return {
+        positionName: tpl.title,
+        requirements: '',
+        templateTitle: tpl.title,
+        text,
+        confidence: 0,
+      } satisfies TeamOrganizationResult;
+    })
+  );
+
+  for (const res of secondaryResults) {
+    if (res) results.push(res);
   }
 
   return formatOutput(results);
