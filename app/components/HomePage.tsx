@@ -5,6 +5,7 @@ import Link from "next/link";
 import { TenderSource } from "./TenderSource";
 import { RawExtractedText } from "./RawExtractedText";
 import { Introduction } from "./Introduction";
+import { TeamOrganization } from "./TeamOrganization";
 import { KssSmrSection, type SmrResult } from "./KssSmrSection";
 import { GenerateDocxButton } from "./GenerateDocxButton";
 
@@ -14,20 +15,27 @@ interface HomePageProps {
   initialRawText?: string;
   initialIntroductionText?: string;
   initialSmrResults?: unknown[];
+  initialTeamOrganizationText?: string;
 }
 
 export function HomePage({
   tenderId,
-  initialName = '',
-  initialRawText = '',
-  initialIntroductionText = '',
+  initialName = "",
+  initialRawText = "",
+  initialIntroductionText = "",
   initialSmrResults = [],
+  initialTeamOrganizationText = "",
 }: HomePageProps) {
   const [tenderName, setTenderName] = useState(initialName);
   const [rawText, setRawText] = useState(initialRawText);
-  const [introductionText, setIntroductionText] = useState(initialIntroductionText);
+  const [introductionText, setIntroductionText] = useState(
+    initialIntroductionText,
+  );
+  const [teamOrganizationText, setTeamOrganizationText] = useState(
+    initialTeamOrganizationText,
+  );
   const [smrResults, setSmrResults] = useState<SmrResult[]>(
-    initialSmrResults as SmrResult[]
+    initialSmrResults as SmrResult[],
   );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -39,25 +47,27 @@ export function HomePage({
       setSaveError(null);
       try {
         const res = await fetch(`/api/tenders/${tenderId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(fields),
         });
         const data = (await res.json()) as { error?: string };
-        if (!res.ok) throw new Error(data.error ?? 'Save failed');
+        if (!res.ok) throw new Error(data.error ?? "Save failed");
         setLastSaved(
-          new Date().toLocaleTimeString('bg-BG', {
-            hour: '2-digit',
-            minute: '2-digit',
-          })
+          new Date().toLocaleTimeString("bg-BG", {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
         );
       } catch (err) {
-        setSaveError(err instanceof Error ? err.message : 'Грешка при запазване');
+        setSaveError(
+          err instanceof Error ? err.message : "Грешка при запазване",
+        );
       } finally {
         setSaving(false);
       }
     },
-    [tenderId]
+    [tenderId],
   );
 
   const handleNameBlur = () => {
@@ -70,10 +80,18 @@ export function HomePage({
     saveTender({
       name: tenderName,
       introduction_text: introductionText,
+      team_organization_text: teamOrganizationText,
       raw_text: rawText,
       smr_results: smrResults,
     });
-  }, [saveTender, tenderName, introductionText, rawText, smrResults]);
+  }, [
+    saveTender,
+    tenderName,
+    introductionText,
+    teamOrganizationText,
+    rawText,
+    smrResults,
+  ]);
 
   return (
     <div className="min-h-screen bg-neutral-100 text-neutral-900">
@@ -109,7 +127,7 @@ export function HomePage({
               href="/admin/templates"
               className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
             >
-              Шаблони СМР
+              Шаблони
             </Link>
           </div>
         </div>
@@ -147,10 +165,16 @@ export function HomePage({
           smrResults={smrResults}
           onSmrResultsUpdate={setSmrResults}
         />
+        <TeamOrganization
+          rawText={rawText}
+          teamOrganizationText={teamOrganizationText}
+          onTeamOrganizationUpdate={setTeamOrganizationText}
+        />
         <GenerateDocxButton
           introductionText={introductionText}
           rawText={rawText}
           smrResults={smrResults}
+          teamOrganizationText={teamOrganizationText}
           onAfterExport={handleAfterDocxExport}
         />
       </main>

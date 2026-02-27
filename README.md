@@ -16,7 +16,7 @@ Production-ready MVP web application for generating Tender Technical documents. 
 - **Fallback** – Without Supabase: simple fetch + HTML link parsing (works for static pages)
 - **File upload** – PDF, DOC and DOCX extraction (multiple files)
 - **AI Introduction** – LangChain + OpenAI generation with strict rephrasing rules
-- **KSS → SMR** – Upload KSS Excel + "Шаблони СМР.docx"; LLM matches each KSS position to an SMR block and returns descriptive text (confidence ≥ 60) or "[не е намерен]"
+- **KSS → SMR** – Upload KSS Excel + "Шаблони СМР"; LLM matches each KSS position to an SMR block and returns descriptive text (confidence ≥ 60) or "[не е намерен]"
 - **DOCX export** – Download DOCX with **1. Увод** and **2. Текстове за КСС** (if KSS SMR was generated)
 
 ## Project structure
@@ -71,12 +71,15 @@ OPENAI_API_KEY=sk-your-openai-api-key
 # For automatic CAIS document fetch (Puppeteer + Supabase)
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
+NEXT_PUBLIC_TEMPLATES_PIN=your_pin_here
 ```
 
 **Required:**
+
 - `OPENAI_API_KEY` – OpenAI API key for LangChain/LLM calls (server-side only, never exposed to client)
 
 **For CAIS automatic document fetch (Puppeteer + Storage):**
+
 - `SUPABASE_URL` – Supabase project URL
 - `SUPABASE_ANON_KEY` – Anon key (run `scripts/supabase-storage-policies.sql` for access)
 

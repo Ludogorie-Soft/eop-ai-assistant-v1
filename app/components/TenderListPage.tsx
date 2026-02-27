@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 interface TenderSummary {
   id: string;
@@ -14,14 +14,14 @@ interface TenderSummary {
 }
 
 function formatDate(iso: string): string {
-  if (!iso) return '—';
+  if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleString('bg-BG', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
+    return new Date(iso).toLocaleString("bg-BG", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   } catch {
     return iso;
@@ -39,15 +39,15 @@ export function TenderListPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/tenders');
+      const res = await fetch("/api/tenders");
       const data = (await res.json()) as {
         tenders?: TenderSummary[];
         error?: string;
       };
-      if (!res.ok) throw new Error(data.error ?? 'Failed to load');
+      if (!res.ok) throw new Error(data.error ?? "Failed to load");
       setTenders(data.tenders ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Грешка при зареждане');
+      setError(err instanceof Error ? err.message : "Грешка при зареждане");
     } finally {
       setLoading(false);
     }
@@ -61,21 +61,21 @@ export function TenderListPage() {
     setCreating(true);
     setError(null);
     try {
-      const res = await fetch('/api/tenders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Нова поръчка' }),
+      const res = await fetch("/api/tenders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Нова поръчка" }),
       });
       const data = (await res.json()) as {
         tender?: { id: string };
         error?: string;
       };
-      if (!res.ok) throw new Error(data.error ?? 'Failed to create');
+      if (!res.ok) throw new Error(data.error ?? "Failed to create");
       if (data.tender?.id) {
         router.push(`/tender/${data.tender.id}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Грешка при създаване');
+      setError(err instanceof Error ? err.message : "Грешка при създаване");
       setCreating(false);
     }
   };
@@ -84,12 +84,12 @@ export function TenderListPage() {
     if (!confirm(`Сигурни ли сте, че искате да изтриете „${name}"?`)) return;
     setError(null);
     try {
-      const res = await fetch(`/api/tenders/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/tenders/${id}`, { method: "DELETE" });
       const data = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Delete failed');
+      if (!res.ok) throw new Error(data.error ?? "Delete failed");
       await fetchTenders();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Грешка при изтриване');
+      setError(err instanceof Error ? err.message : "Грешка при изтриване");
     }
   };
 
@@ -109,7 +109,7 @@ export function TenderListPage() {
             href="/admin/templates"
             className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
           >
-            Шаблони СМР
+            Шаблони
           </Link>
         </div>
       </header>
@@ -124,7 +124,7 @@ export function TenderListPage() {
             disabled={creating}
             className="rounded-md bg-neutral-700 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
           >
-            {creating ? 'Създаване...' : 'Добави нова поръчка'}
+            {creating ? "Създаване..." : "Добави нова поръчка"}
           </button>
         </div>
 
@@ -141,9 +141,7 @@ export function TenderListPage() {
             </div>
           ) : tenders.length === 0 ? (
             <div className="px-6 py-12 text-center">
-              <p className="text-sm text-neutral-500">
-                Няма запазени поръчки.
-              </p>
+              <p className="text-sm text-neutral-500">Няма запазени поръчки.</p>
               <button
                 onClick={handleCreate}
                 disabled={creating}
@@ -164,7 +162,7 @@ export function TenderListPage() {
                     className="min-w-0 flex-1 group"
                   >
                     <span className="text-sm font-medium text-neutral-800 group-hover:text-neutral-600">
-                      {t.name || 'Без име'}
+                      {t.name || "Без име"}
                     </span>
                     <div className="mt-0.5 flex items-center gap-3 text-xs text-neutral-500">
                       <span>{formatDate(t.updatedAt)}</span>

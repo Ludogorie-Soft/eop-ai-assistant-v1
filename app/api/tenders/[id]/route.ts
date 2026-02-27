@@ -1,7 +1,7 @@
 /**
  * Single tender API.
  * GET    - fetch tender by id
- * PUT    - update tender fields (name, introduction_text, raw_text, smr_results)
+ * PUT    - update tender fields (name, introduction_text, team_organization_text, raw_text, smr_results)
  * DELETE - delete tender
  */
 
@@ -33,6 +33,8 @@ export async function PUT(request: NextRequest, ctx: Ctx) {
     if (typeof body.name === 'string') fields.name = body.name;
     if (typeof body.introduction_text === 'string') fields.introduction_text = body.introduction_text;
     if (typeof body.raw_text === 'string') fields.raw_text = body.raw_text;
+    if (typeof body.team_organization_text === 'string')
+      fields.team_organization_text = body.team_organization_text;
     if (Array.isArray(body.smr_results)) fields.smr_results = body.smr_results;
 
     if (Object.keys(fields).length === 0) {

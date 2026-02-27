@@ -3,7 +3,7 @@
  * based on location extracted from tender documentation.
  */
 
-const STREET_VIEW_BASE = 'https://maps.googleapis.com/maps/api/streetview';
+const STREET_VIEW_BASE = "https://maps.googleapis.com/maps/api/streetview";
 const IMAGE_WIDTH = 800;
 const IMAGE_HEIGHT = 500;
 
@@ -21,7 +21,8 @@ function extractCity(text: string): string | null {
   return null;
 }
 
-const STOP_WORDS = /^(е|в|на|от|за|до|по|с|се|и|или|при|като|към|без|след|между|има|може|са|ще|да|не)$/i;
+const STOP_WORDS =
+  /^(е|в|на|от|за|до|по|с|се|и|или|при|като|към|без|след|между|има|може|са|ще|да|не)$/i;
 
 /** Remove trailing stop-words from a street name */
 function trimStopWords(name: string): string {
@@ -29,40 +30,35 @@ function trimStopWords(name: string): string {
   while (words.length > 1 && STOP_WORDS.test(words[words.length - 1])) {
     words.pop();
   }
-  return words.join(' ');
+  return words.join(" ");
 }
 
 /**
  * Search a single text block for a location.
  * Returns a short string like "ул. Христо Ботев, Правец" or null.
  */
-function findLocationIn(text: string): { address: string; city: string | null } | null {
+function findLocationIn(
+  text: string,
+): { address: string; city: string | null } | null {
   const city = extractCity(text);
 
-  // бул. (boulevard) -- check BEFORE ул. to avoid бул. matching as ул.
-  const blvdQuoted = text.match(
-    new RegExp(`бул\\.\\s*${Q}([^„""«»"\\n]{2,40})${Q}`, 'i')
-  );
-  if (blvdQuoted) {
-    return { address: `бул. ${blvdQuoted[1].replace(/\s+/g, ' ').trim()}`, city };
-  }
-  const blvdPlain = text.match(/бул\.\s+([А-Яа-я]+(?:\s+[А-Яа-я]+){0,3})/i);
-  if (blvdPlain) {
-    return { address: `бул. ${trimStopWords(blvdPlain[1].replace(/\s+/g, ' ').trim())}`, city };
-  }
-
-  // ул. (street, quoted)
+  // ул. (street, quoted) – ПРЕДПОЧИТАМЕ УЛИЦА ПРЕД БУЛЕВАРД
   const streetQuoted = text.match(
-    new RegExp(`(?<!б)ул\\.\\s*${Q}([^„""«»"\\n]{2,40})${Q}`, 'i')
+    new RegExp(`(?<!б)ул\\.\\s*${Q}([^„""«»"\\n]{2,40})${Q}`, "i"),
   );
   if (streetQuoted) {
-    return { address: `ул. ${streetQuoted[1].replace(/\s+/g, ' ').trim()}`, city };
+    return {
+      address: `ул. ${streetQuoted[1].replace(/\s+/g, " ").trim()}`,
+      city,
+    };
   }
 
   // ул. (street, unquoted, 1-4 Cyrillic words)
-  const streetPlain = text.match(/(?<!б)ул\.\s+([А-Яа-я]+(?:\s+[А-Яа-я]+){0,3})/i);
+  const streetPlain = text.match(
+    /(?<!б)ул\.\s+([А-Яа-я]+(?:\s+[А-Яа-я]+){0,3})/i,
+  );
   if (streetPlain) {
-    const name = trimStopWords(streetPlain[1].replace(/\s+/g, ' ').trim());
+    const name = trimStopWords(streetPlain[1].replace(/\s+/g, " ").trim());
     if (name.length >= 2) {
       return { address: `ул. ${name}`, city };
     }
@@ -70,10 +66,28 @@ function findLocationIn(text: string): { address: string; city: string | null } 
 
   // път / пътен участък (road)
   const roadMatch = text.match(
-    /(?:път|пътен\s+участък)\s+([A-ZА-Яа-я\d\s–-]{3,40}?)(?:\s*[,.]|\s+от\s+|\s+в\s+)/i
+    /(?:път|пътен\s+участък)\s+([A-ZА-Яа-я\d\s–-]{3,40}?)(?:\s*[,.]|\s+от\s+|\s+в\s+)/i,
   );
   if (roadMatch) {
-    return { address: roadMatch[1].replace(/\s+/g, ' ').trim(), city };
+    return { address: roadMatch[1].replace(/\s+/g, " ").trim(), city };
+  }
+
+  // бул. (boulevard) – ако НЯМА ул. или път, ползваме булевард
+  const blvdQuoted = text.match(
+    new RegExp(`бул\\.\\s*${Q}([^„""«»"\\n]{2,40})${Q}`, "i"),
+  );
+  if (blvdQuoted) {
+    return {
+      address: `бул. ${blvdQuoted[1].replace(/\s+/g, " ").trim()}`,
+      city,
+    };
+  }
+  const blvdPlain = text.match(/бул\.\s+([А-Яа-я]+(?:\s+[А-Яа-я]+){0,3})/i);
+  if (blvdPlain) {
+    return {
+      address: `бул. ${trimStopWords(blvdPlain[1].replace(/\s+/g, " ").trim())}`,
+      city,
+    };
   }
 
   // Only city found
@@ -88,11 +102,22 @@ function findLocationIn(text: string): { address: string; city: string | null } 
  * Try to extract a meaningful location query from the introduction or raw text.
  * Searches the introduction FIRST (it has the main subject), then falls back to rawText.
  */
-export function extractLocation(introductionText: string, rawText?: string): string | null {
+export function extractLocation(
+  introductionText: string,
+  rawText?: string,
+): string | null {
   const fromIntro = findLocationIn(introductionText);
   const fromRaw = rawText ? findLocationIn(rawText) : null;
 
-  const result = fromIntro ?? fromRaw;
+  // Ако уводът съдържа конкретна улица/булевард/път (не само град),
+  // ползваме него, защото е най-близо до реалния описан обект.
+  // Ако в увода имаме само град, но в rawText има улица, падаме обратно към rawText.
+  const introHasOnlyCity =
+    fromIntro && fromIntro.city && fromIntro.address === fromIntro.city;
+  const result =
+    (fromIntro && !introHasOnlyCity ? fromIntro : null) ??
+    fromRaw ??
+    fromIntro;
   if (!result) return null;
 
   const city = fromIntro?.city ?? fromRaw?.city;
@@ -107,11 +132,13 @@ export function extractLocation(introductionText: string, rawText?: string): str
  * Returns the JPEG buffer, or null if the API key is missing, no coverage, or request fails.
  */
 export async function fetchStreetViewImage(
-  location: string
+  location: string,
 ): Promise<Buffer | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) {
-    console.warn('[streetView] GOOGLE_MAPS_API_KEY not set, skipping Street View image');
+    console.warn(
+      "[streetView] GOOGLE_MAPS_API_KEY not set, skipping Street View image",
+    );
     return null;
   }
 
@@ -120,11 +147,15 @@ export async function fetchStreetViewImage(
     key: apiKey,
   });
   try {
-    const metaRes = await fetch(`${STREET_VIEW_BASE}/metadata?${metaParams.toString()}`);
+    const metaRes = await fetch(
+      `${STREET_VIEW_BASE}/metadata?${metaParams.toString()}`,
+    );
     if (metaRes.ok) {
-      const meta = await metaRes.json() as { status?: string };
-      if (meta.status !== 'OK') {
-        console.warn(`[streetView] No Street View coverage for "${location}" (status: ${meta.status})`);
+      const meta = (await metaRes.json()) as { status?: string };
+      if (meta.status !== "OK") {
+        console.warn(
+          `[streetView] No Street View coverage for "${location}" (status: ${meta.status})`,
+        );
         return null;
       }
     }
@@ -135,8 +166,8 @@ export async function fetchStreetViewImage(
   const params = new URLSearchParams({
     location,
     size: `${IMAGE_WIDTH}x${IMAGE_HEIGHT}`,
-    fov: '90',
-    pitch: '0',
+    fov: "90",
+    pitch: "0",
     key: apiKey,
   });
 
@@ -145,13 +176,15 @@ export async function fetchStreetViewImage(
   try {
     const res = await fetch(url);
     if (!res.ok) {
-      console.error(`[streetView] Google Street View API error: ${res.status} ${res.statusText}`);
+      console.error(
+        `[streetView] Google Street View API error: ${res.status} ${res.statusText}`,
+      );
       return null;
     }
     const arrayBuffer = await res.arrayBuffer();
     return Buffer.from(arrayBuffer);
   } catch (err) {
-    console.error('[streetView] Failed to fetch Street View image:', err);
+    console.error("[streetView] Failed to fetch Street View image:", err);
     return null;
   }
 }

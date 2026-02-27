@@ -1,13 +1,14 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
-import { HomePage } from '@/app/components/HomePage';
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import { HomePage } from "@/app/components/HomePage";
 
 interface TenderData {
   id: string;
   name: string;
   introduction_text: string;
+  team_organization_text: string;
   raw_text: string;
   smr_results: unknown[];
 }
@@ -29,10 +30,10 @@ export default function TenderDetailPage() {
           tender?: TenderData;
           error?: string;
         };
-        if (!res.ok) throw new Error(data.error ?? 'Failed to load');
+        if (!res.ok) throw new Error(data.error ?? "Failed to load");
         setTender(data.tender ?? null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Грешка при зареждане');
+        setError(err instanceof Error ? err.message : "Грешка при зареждане");
       } finally {
         setLoading(false);
       }
@@ -51,8 +52,13 @@ export default function TenderDetailPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-neutral-100">
         <div className="text-center">
-          <p className="text-sm text-red-600">{error ?? 'Поръчката не е намерена.'}</p>
-          <a href="/" className="mt-2 inline-block text-sm text-neutral-600 hover:underline">
+          <p className="text-sm text-red-600">
+            {error ?? "Поръчката не е намерена."}
+          </p>
+          <a
+            href="/"
+            className="mt-2 inline-block text-sm text-neutral-600 hover:underline"
+          >
             Към списъка
           </a>
         </div>
@@ -66,6 +72,7 @@ export default function TenderDetailPage() {
       initialName={tender.name}
       initialRawText={tender.raw_text}
       initialIntroductionText={tender.introduction_text}
+       initialTeamOrganizationText={tender.team_organization_text}
       initialSmrResults={tender.smr_results}
     />
   );
