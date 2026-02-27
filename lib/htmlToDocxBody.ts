@@ -39,9 +39,6 @@ function decodeEntities(text: string): string {
     .replace(/&nbsp;/g, " ");
 }
 
-function stripTags(html: string): string {
-  return html.replace(/<[^>]+>/g, "");
-}
 
 // ---------------------------------------------------------------------------
 // Inline parsing: <strong>, <em>, <b>, <i>, <br>, text
@@ -108,7 +105,7 @@ function parseInline(html: string): TextRun[] {
  * PNG: 8-byte signature, IHDR chunk starts at offset 8.
  * Width at bytes 16–19, height at bytes 20–23 (big-endian uint32).
  */
-function getPngDimensions(buf: Buffer): { width: number; height: number } {
+function getPngDimensions(buf: Buffer): { width: number; height: number } | null {
   try {
     if (buf.length >= 24) {
       const w = buf.readUInt32BE(16);
@@ -120,6 +117,70 @@ function getPngDimensions(buf: Buffer): { width: number; height: number } {
   } catch {
     /* ignore */
   }
+  return null;
+}
+
+/**
+ * Extract JPEG dimensions by scanning for SOF (Start of Frame) markers.
+ * SOF markers: 0xFFC0–0xFFC3, 0xFFC5–0xFFC7, 0xFFC9–0xFFCB, 0xFFCD–0xFFCF.
+ * Frame header: marker(2) + length(2) + precision(1) + height(2) + width(2).
+ */
+function getJpgDimensions(buf: Buffer): { width: number; height: number } | null {
+  try {
+    let offset = 2; // skip SOI marker (0xFFD8)
+    while (offset + 4 < buf.length) {
+      if (buf[offset] !== 0xff) break;
+      const marker = buf[offset + 1];
+      // SOF markers (excluding DHT 0xC4, JPG 0xC8, DAC 0xCC)
+      if (
+        marker >= 0xc0 &&
+        marker <= 0xcf &&
+        marker !== 0xc4 &&
+        marker !== 0xc8 &&
+        marker !== 0xcc
+      ) {
+        if (offset + 9 <= buf.length) {
+          const h = buf.readUInt16BE(offset + 5);
+          const w = buf.readUInt16BE(offset + 7);
+          if (w > 0 && w < 10000 && h > 0 && h < 10000) {
+            return { width: w, height: h };
+          }
+        }
+        break;
+      }
+      // Skip to next marker: length is big-endian uint16 at offset+2
+      const segLen = buf.readUInt16BE(offset + 2);
+      offset += 2 + segLen;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * Detect tiny bullet-icon or blank placeholder images that should be skipped.
+ * - 15x15 cross icons (both dims ≤ 20px)
+ * - ~140x102 blank rectangle placeholders (filesize < 500 bytes)
+ */
+function isPlaceholderImage(
+  dims: { width: number; height: number },
+  data: Buffer,
+): boolean {
+  if (dims.width <= 20 && dims.height <= 20) return true;
+  if (data.length < 500 && dims.width <= 150 && dims.height <= 150) return true;
+  return false;
+}
+
+/**
+ * Get image dimensions for any supported type. Returns fallback if parsing fails.
+ */
+function getImageDimensions(
+  type: "png" | "jpg" | "gif",
+  data: Buffer,
+): { width: number; height: number } {
+  if (type === "png") return getPngDimensions(data) ?? { width: 400, height: 300 };
+  if (type === "jpg") return getJpgDimensions(data) ?? { width: 400, height: 300 };
   return { width: 400, height: 300 };
 }
 
@@ -134,6 +195,115 @@ function scaleToMaxWidth(
     width: Math.round(width * scale),
     height: Math.round(height * scale),
   };
+}
+
+/**
+ * Verify that the image buffer starts with the expected binary signature.
+ * Rejects corrupt payloads such as WMF/EMF data wrapped in an image/png MIME type,
+ * which would embed broken images in the output DOCX.
+ */
+function isValidImageData(
+  type: "png" | "jpg" | "gif",
+  data: Buffer,
+): boolean {
+  if (data.length < 8) return false;
+  switch (type) {
+    case "png":
+      return (
+        data[0] === 0x89 &&
+        data[1] === 0x50 &&
+        data[2] === 0x4e &&
+        data[3] === 0x47 &&
+        data[4] === 0x0d &&
+        data[5] === 0x0a &&
+        data[6] === 0x1a &&
+        data[7] === 0x0a
+      );
+    case "jpg":
+      return data[0] === 0xff && data[1] === 0xd8;
+    case "gif":
+      // GIF87a or GIF89a
+      return data[0] === 0x47 && data[1] === 0x49 && data[2] === 0x46;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Merge standalone image-only <p> elements with the following <p> element.
+ *
+ * mammoth extracts Word picture-bullet lists as pairs of:
+ *   <p><img .../></p>          ← bullet icon paragraph
+ *   <p>item text</p>           ← list item text paragraph
+ * instead of a single inline <p><img .../>item text</p>.
+ *
+ * Two-pass strategy:
+ *   Pass 1 – replace each image-only <p>…</p> with an indexed marker
+ *             __PIMG_N__ so the following <p> opening is NOT consumed and
+ *             can still be independently found in later passes.
+ *   Pass 2 – inject the stored img tags at the start of the next <p> body.
+ *
+ * Images wrapped in <span> or other elements are handled by stripping all
+ * non-img tags when checking for visible text.
+ */
+function mergeImageOnlyParagraphs(html: string): string {
+  const imgStore: string[] = [];
+
+  // Pass 1: replace image-only paragraphs with stable inline markers.
+  // Each <p>…</p> is matched independently (no next-<p> captured), so
+  // consecutive image paragraphs all get individual markers.
+  const marked = html.replace(
+    /<p[^>]*>([\s\S]*?)<\/p\s*>/gi,
+    (fullMatch, content: string) => {
+      // Strip img tags, then strip all remaining HTML tags to get visible text
+      const textOnly = content
+        .replace(/<img[^>]*\/?>/gi, "")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&nbsp;/gi, " ")
+        .trim();
+
+      if (textOnly.length > 0) return fullMatch; // has text → keep as-is
+
+      // Extract all <img> tags (even if nested inside <span> etc.)
+      const imgs = [...content.matchAll(/<img[^>]*\/?>/gi)]
+        .map((m) => m[0])
+        .join("");
+
+      if (!imgs) return fullMatch; // no images → keep as-is
+
+      const idx = imgStore.length;
+      imgStore.push(imgs);
+      return `__PIMG_${idx}__`;
+    },
+  );
+
+  if (imgStore.length === 0) return html; // nothing to merge
+
+  // Pass 1.5: strip whitespace-only paragraphs between markers and the next <p>.
+  // mammoth sometimes emits <p> </p> or <p>&nbsp;</p> between icon and text,
+  // which breaks the marker→<p> adjacency needed for Pass 2.
+  let cleaned = marked.replace(
+    /(__PIMG_\d+__)\s*<p[^>]*>\s*(?:&nbsp;\s*)*<\/p\s*>/gi,
+    "$1",
+  );
+
+  // Pass 2: inject stored img tags at the start of the following <p> body.
+  // Repeat until stable so that chained markers are all resolved.
+  let prev = "";
+  let curr = cleaned;
+  while (prev !== curr) {
+    prev = curr;
+    curr = curr.replace(
+      /__PIMG_(\d+)__\s*(<p[^>]*>)/gi,
+      (_m, idxStr: string, nextPOpen: string) => {
+        const imgs = imgStore[parseInt(idxStr, 10)] ?? "";
+        return nextPOpen + imgs;
+      },
+    );
+  }
+
+  // Remove any remaining markers that had no following <p> (end of section)
+  return curr.replace(/__PIMG_\d+__/g, "");
 }
 
 /**
@@ -166,11 +336,10 @@ function imgToParagraph(imgHtml: string): Paragraph | null {
 
   const parsed = parseDataUri(srcMatch[1]);
   if (!parsed) return null;
+  if (!isValidImageData(parsed.type, parsed.data)) return null;
 
-  const raw =
-    parsed.type === "png"
-      ? getPngDimensions(parsed.data)
-      : { width: 400, height: 300 };
+  const raw = getImageDimensions(parsed.type, parsed.data);
+  if (isPlaceholderImage(raw, parsed.data)) return null;
 
   const dims = scaleToMaxWidth(raw.width, raw.height, 500);
 
@@ -239,11 +408,12 @@ function parseParagraphBlock(pHtml: string): Paragraph[] {
       imgMatch[0].match(/src='([^']+)'/i);
     if (srcMatch) {
       const parsed = parseDataUri(srcMatch[1]);
-      if (parsed) {
-        const raw =
-          parsed.type === "png"
-            ? getPngDimensions(parsed.data)
-            : { width: 20, height: 20 };
+      if (parsed && isValidImageData(parsed.type, parsed.data)) {
+        const raw = getImageDimensions(parsed.type, parsed.data);
+        if (isPlaceholderImage(raw, parsed.data)) {
+          lastIndex = imgMatch.index + imgMatch[0].length;
+          continue;
+        }
         const dims = scaleToMaxWidth(raw.width, raw.height, 400);
         children.push(
           new ImageRun({
@@ -285,30 +455,6 @@ function parseListBlock(listHtml: string): Paragraph[] {
   });
 }
 
-function parseTableBlock(tableHtml: string): Paragraph[] {
-  // Extract rows, render each row's cells as "cell1 | cell2 | ..." plain text
-  const rows = [...tableHtml.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr\s*>/gi)];
-  return rows.flatMap((row) => {
-    const cells = [...row[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]\s*>/gi)];
-    const cellTexts = cells
-      .map((c) => decodeEntities(stripTags(c[1])).replace(/\s+/g, " ").trim())
-      .filter(Boolean);
-    if (cellTexts.length === 0) return [];
-    return [
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: cellTexts.join(" | "),
-            font: FONT,
-            size: FONT_SIZE,
-          }),
-        ],
-        spacing: defaultSpacing,
-      }),
-    ];
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
@@ -340,12 +486,18 @@ export function htmlToDocxElements(html: string): Paragraph[] {
     return `__TABLE${tableBlocks.length - 1}__`;
   });
 
-  // Step 2: Match top-level block elements sequentially.
+  // Step 2: Merge standalone image-only <p> elements with the next <p>.
+  // mammoth emits Word picture-bullet icons as separate <p><img/></p> paragraphs
+  // instead of keeping them inline with the list item text. This transform re-joins
+  // them so the icon renders inline with its text (matching the original template).
+  const htmlMerged = mergeImageOnlyParagraphs(htmlNoTables);
+
+  // Step 3: Match top-level block elements sequentially.
   const blockRegex =
     /(<p[^>]*>[\s\S]*?<\/p\s*>|<ul[^>]*>[\s\S]*?<\/ul\s*>|<ol[^>]*>[\s\S]*?<\/ol\s*>|<img[^>]*\/?>|__TABLE\d+__)/gi;
 
   let match: RegExpExecArray | null;
-  while ((match = blockRegex.exec(htmlNoTables)) !== null) {
+  while ((match = blockRegex.exec(htmlMerged)) !== null) {
     const block = match[0];
 
     if (/^<p/i.test(block)) {

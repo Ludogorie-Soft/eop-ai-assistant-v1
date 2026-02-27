@@ -254,20 +254,12 @@ export async function generateTenderDocx(
         }),
       );
       if (r.htmlBody) {
-        // Use rich HTML body: preserves bold, italic, bullet lists, and images from the SMR template
+        // Use rich HTML body: preserves bold, italic, bullet lists, and images from the SMR template.
+        // When richElements is empty (e.g. the section body is a flowchart table with no extractable
+        // images), we output nothing rather than falling back to the garbage plain-text version
+        // of the table cells (decision-tree labels like "да/не/?/КРАЙ").
         const richElements = htmlToDocxElements(r.htmlBody);
-        if (richElements.length > 0) {
-          paragraphs.push(...richElements);
-        } else {
-          // Fallback to plain text if HTML parsing yielded nothing
-          paragraphs.push(
-            new Paragraph({
-              children: [new TextRun({ text: r.text, font: FONT, size: FONT_SIZE })],
-              alignment: AlignmentType.BOTH,
-              spacing: { ...defaultSpacing, before: 0 },
-            }),
-          );
-        }
+        paragraphs.push(...richElements);
       } else {
         paragraphs.push(
           new Paragraph({
