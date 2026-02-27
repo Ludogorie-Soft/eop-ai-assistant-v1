@@ -6,7 +6,13 @@
  * Server-side only.
  */
 
-import { Paragraph, TextRun, ImageRun, AlignmentType, LineRuleType } from "docx";
+import {
+  Paragraph,
+  TextRun,
+  ImageRun,
+  AlignmentType,
+  LineRuleType,
+} from "docx";
 
 const FONT = "Times New Roman";
 const FONT_SIZE = 22; // 11pt in half-points
@@ -78,7 +84,13 @@ function parseInline(html: string): TextRun[] {
       const text = decodeEntities(token);
       if (text) {
         runs.push(
-          new TextRun({ text, font: FONT, size: FONT_SIZE, bold, italics: italic }),
+          new TextRun({
+            text,
+            font: FONT,
+            size: FONT_SIZE,
+            bold,
+            italics: italic,
+          }),
         );
       }
     }
@@ -118,7 +130,10 @@ function scaleToMaxWidth(
 ): { width: number; height: number } {
   if (width <= maxWidth) return { width, height };
   const scale = maxWidth / width;
-  return { width: Math.round(width * scale), height: Math.round(height * scale) };
+  return {
+    width: Math.round(width * scale),
+    height: Math.round(height * scale),
+  };
 }
 
 /**
@@ -197,8 +212,8 @@ function parseParagraphBlock(pHtml: string): Paragraph[] {
   // Check whether there is any non-image text content
   const textOnly = inner.replace(/<img[^>]*\/?>/gi, "");
   const testRuns = parseInline(textOnly);
-  const hasText = testRuns.some(
-    (r) => (r as unknown as { text?: string }).text?.trim(),
+  const hasText = testRuns.some((r) =>
+    (r as unknown as { text?: string }).text?.trim(),
   );
 
   if (!hasText) {
@@ -320,13 +335,10 @@ export function htmlToDocxElements(html: string): Paragraph[] {
   // Step 1: Extract all <table> blocks and replace with stable placeholders.
   // This prevents the main block regex from partially matching nested table content.
   const tableBlocks: string[] = [];
-  const htmlNoTables = html.replace(
-    /<table[\s\S]*?<\/table\s*>/gi,
-    (match) => {
-      tableBlocks.push(match);
-      return `__TABLE${tableBlocks.length - 1}__`;
-    },
-  );
+  const htmlNoTables = html.replace(/<table[\s\S]*?<\/table\s*>/gi, (match) => {
+    tableBlocks.push(match);
+    return `__TABLE${tableBlocks.length - 1}__`;
+  });
 
   // Step 2: Match top-level block elements sequentially.
   const blockRegex =

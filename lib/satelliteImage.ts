@@ -75,7 +75,10 @@ function findLocationIn(
     new RegExp(`улица\\s+${Q}([^„""«»"\\n]{2,40})${Q}`, "i"),
   );
   if (streetFullQuoted) {
-    return { address: `ул. ${streetFullQuoted[1].replace(/\s+/g, " ").trim()}`, city };
+    return {
+      address: `ул. ${streetFullQuoted[1].replace(/\s+/g, " ").trim()}`,
+      city,
+    };
   }
   const streetFullPlain = text.match(
     /улица\s+([А-Яа-я]+(?:\s+[А-Яа-я]+){0,3})/i,
@@ -135,7 +138,9 @@ function findLocationIn(
   }
 
   // кв. (квартал / district)
-  const kvMatch = text.match(/кв(?:артал)?\.\s+([А-Яа-я]+(?:\s+[А-Яа-я]+){0,2})/i);
+  const kvMatch = text.match(
+    /кв(?:артал)?\.\s+([А-Яа-я]+(?:\s+[А-Яа-я]+){0,2})/i,
+  );
   if (kvMatch) {
     const name = trimStopWords(kvMatch[1].replace(/\s+/g, " ").trim());
     if (name.length >= 2) return { address: `кв. ${name}`, city };
@@ -166,9 +171,7 @@ export function extractLocation(
   const introHasOnlyCity =
     fromIntro && fromIntro.city && fromIntro.address === fromIntro.city;
   const result =
-    (fromIntro && !introHasOnlyCity ? fromIntro : null) ??
-    fromRaw ??
-    fromIntro;
+    (fromIntro && !introHasOnlyCity ? fromIntro : null) ?? fromRaw ?? fromIntro;
   if (!result) return null;
 
   const city = fromIntro?.city ?? fromRaw?.city;
