@@ -73,6 +73,9 @@ export function TenderListPage() {
       if (!res.ok) throw new Error(data.error ?? "Failed to create");
       if (data.tender?.id) {
         router.push(`/tender/${data.tender.id}`);
+      } else {
+        setError("Неочаквана грешка: поръчката е създадена, но без идентификатор.");
+        setCreating(false);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Грешка при създаване");

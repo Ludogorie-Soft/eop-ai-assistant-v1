@@ -24,19 +24,17 @@ export async function generateSmrTextsForKss(
   kssItems: KssItem[],
   smrTemplates: SmrTemplate[]
 ): Promise<SmrResult[]> {
-  const results: SmrResult[] = [];
-
-  for (const item of kssItems) {
-    const match = await matchKssToSmr(item.name, smrTemplates);
-    results.push({
-      kssCode: item.code,
-      kssName: item.name,
-      matchedTitle: match.matchedTitle,
-      text: match.text,
-      confidence: match.confidence,
-      htmlBody: match.htmlBody,
-    });
-  }
-
-  return results;
+  return Promise.all(
+    kssItems.map(async (item) => {
+      const match = await matchKssToSmr(item.name, smrTemplates);
+      return {
+        kssCode: item.code,
+        kssName: item.name,
+        matchedTitle: match.matchedTitle,
+        text: match.text,
+        confidence: match.confidence,
+        htmlBody: match.htmlBody,
+      };
+    }),
+  );
 }

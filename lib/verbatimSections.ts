@@ -175,7 +175,7 @@ function stripKssFromSection(text: string): string {
 function findEarliestStop(text: string, patterns: RegExp[]): number {
   let earliest = text.length;
   for (const p of patterns) {
-    const m = text.match(new RegExp(p.source, p.flags.includes('m') ? 'm' : 'm'));
+    const m = text.match(new RegExp(p.source, p.flags));
     if (m?.index != null && m.index < earliest) {
       earliest = m.index;
     }

@@ -59,6 +59,42 @@ function isTitleTable(tableHtml: string): boolean {
 }
 
 /**
+ * Extract only the top-level <table> elements from an HTML string, correctly
+ * handling nested tables by tracking open/close tag depth.
+ *
+ * The old non-greedy regex `/<table[^>]*>([\s\S]*?)<\/table>/gi` closed at the
+ * first `</table>` it found, which is the inner table's closing tag when nesting
+ * is present. This function counts depth so each entry spans from its own opening
+ * `<table>` to its own matching `</table>`.
+ */
+function extractTopLevelTables(
+  html: string,
+): Array<{ index: number; length: number; tableHtml: string }> {
+  const results: Array<{ index: number; length: number; tableHtml: string }> = [];
+  // Match both opening tags (group 1 empty) and closing tags (group 1 = "/")
+  const tagRe = /<(\/?)table[^>]*>/gi;
+  let depth = 0;
+  let start = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tagRe.exec(html)) !== null) {
+    const isClose = match[1] === "/";
+    if (!isClose) {
+      if (depth === 0) start = match.index;
+      depth++;
+    } else {
+      depth--;
+      if (depth === 0) {
+        const end = match.index + match[0].length;
+        results.push({ index: start, length: end - start, tableHtml: html.slice(start, end) });
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
  * Find all title tables and extract body text for each.
  * Body extends from after the title table to just before the NEXT title table,
  * so intermediate data tables (expert roles, etc.) are included as part of the body.
@@ -66,20 +102,8 @@ function isTitleTable(tableHtml: string): boolean {
 function splitByTables(html: string): Array<{ title: string; body: string; htmlBody: string }> {
   const fullHtml = html.replace(/^\s+|\s+$/g, "");
   const blocks: Array<{ title: string; body: string; htmlBody: string }> = [];
-  const tableRegex = /<table[^>]*>([\s\S]*?)<\/table\s*>/gi;
-  const tableMatches: Array<{
-    index: number;
-    length: number;
-    tableHtml: string;
-  }> = [];
-  let match: RegExpExecArray | null;
-  while ((match = tableRegex.exec(fullHtml)) !== null) {
-    tableMatches.push({
-      index: match.index,
-      length: match[0].length,
-      tableHtml: match[0],
-    });
-  }
+
+  const tableMatches = extractTopLevelTables(fullHtml);
 
   // Identify indices of title tables (section starters) only
   const titleIndices: number[] = [];
