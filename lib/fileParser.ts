@@ -1,6 +1,7 @@
 /**
  * File parser for PDF, DOC and DOCX extraction
  * Uses pdf-parse for PDF, mammoth for DOCX and textutil (macOS) for DOC.
+ * Legacy .doc is only supported on macOS; on Linux (Vercel) an error is thrown.
  * For scanned PDFs (no or bad text layer), falls back to OCR with Tesseract (Bulgarian + English).
  */
 
@@ -100,7 +101,11 @@ export async function extractDocxText(buffer: Buffer): Promise<string> {
 
 export async function extractDocText(buffer: Buffer): Promise<string> {
   // macOS textutil can convert legacy .doc reliably without extra npm deps.
-  if (process.platform !== 'darwin') return '';
+  if (process.platform !== 'darwin') {
+    throw new Error(
+      'Файлове .doc не се поддържат на този сървър. Моля, конвертирайте файла в .docx или .pdf и опитайте отново.'
+    );
+  }
 
   const dir = await mkdtemp(join(tmpdir(), 'eop-doc-'));
   const inputPath = join(dir, 'input.doc');

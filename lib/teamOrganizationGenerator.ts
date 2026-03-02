@@ -153,7 +153,7 @@ async function paraphrasePosition(
   const content = typeof response.content === 'string' ? response.content : '';
   return content
     .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/[✅🔹]/g, '')
+    .replace(/🔹/g, '')
     .trim();
 }
 

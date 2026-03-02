@@ -13,6 +13,7 @@ import {
   HeadingLevel,
   AlignmentType,
   LineRuleType,
+  BorderStyle,
 } from "docx";
 import { htmlToDocxElements } from "./htmlToDocxBody";
 
@@ -294,50 +295,93 @@ export async function generateTenderDocx(
       }),
     );
 
-    const teamBlocks = teamOrganizationText
-      .split(/\n\n+/)
+    // Helper: horizontal rule paragraph (top border)
+    const hrParagraph = () =>
+      new Paragraph({
+        children: [],
+        border: {
+          top: { style: BorderStyle.SINGLE, size: 6, color: "888888", space: 1 },
+        },
+        spacing: { line: LINE_SPACING, lineRule: LineRuleType.AT_LEAST, before: 100, after: 200 },
+      });
+
+    // Split into individual position blocks by the ─ separator used in formatOutput
+    const positionBlocks = teamOrganizationText
+      .split(/─{10,}/)
       .map((s) => s.trim())
       .filter(Boolean);
 
-    for (const block of teamBlocks) {
-      if (block.startsWith("─")) continue;
+    for (const positionText of positionBlocks) {
+      const allLines = positionText.split('\n');
+      const titleLine = allLines[0]?.trim() || '';
+      if (!titleLine) continue;
 
-      const isSubheading = /^(Длъжност|Квалификация|Задължения):/i.test(block);
-      if (isSubheading) {
-        const [label, ...rest] = block.split(":");
-        paragraphs.push(
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: `${label.trim()}: `,
-                font: FONT,
-                size: FONT_SIZE,
-                bold: true,
+      // Role title – bold with bottom border
+      paragraphs.push(
+        new Paragraph({
+          children: [
+            new TextRun({ text: titleLine, font: FONT, size: FONT_SIZE, bold: true }),
+          ],
+          border: {
+            bottom: { style: BorderStyle.SINGLE, size: 6, color: "888888", space: 1 },
+          },
+          spacing: { ...defaultSpacing, before: 400, after: 200 },
+        }),
+      );
+
+      // Split remaining content by --- section separators
+      const rest = allLines.slice(1).join('\n');
+      const sectionParts = rest.split(/\n---+\n|\n---+$|^---+\n/m).map((s) => s.trim());
+
+      for (let si = 0; si < sectionParts.length; si++) {
+        const part = sectionParts[si];
+        if (!part) continue;
+
+        // Add horizontal rule before each section except the first
+        if (si > 0) {
+          paragraphs.push(hrParagraph());
+        }
+
+        const blocks = part.split(/\n\n+/).map((s) => s.trim()).filter(Boolean);
+
+        for (const block of blocks) {
+          // Numbered section header – italic
+          if (/^\d+\.\s/.test(block)) {
+            paragraphs.push(
+              new Paragraph({
+                children: [
+                  new TextRun({ text: block, font: FONT, size: FONT_SIZE, italics: true }),
+                ],
+                spacing: { ...defaultSpacing, before: 200, after: 100 },
               }),
-              new TextRun({
-                text: rest.join(":").trim(),
-                font: FONT,
-                size: FONT_SIZE,
+            );
+            continue;
+          }
+
+          // ✅ sub-section header – regular, preserve emoji
+          if (block.startsWith('✅')) {
+            paragraphs.push(
+              new Paragraph({
+                children: [
+                  new TextRun({ text: block, font: FONT, size: FONT_SIZE }),
+                ],
+                spacing: { ...defaultSpacing, before: 100, after: 100 },
               }),
-            ],
-            alignment: AlignmentType.BOTH,
-            spacing: { ...defaultSpacing, before: 100, after: 100 },
-          }),
-        );
-      } else {
-        paragraphs.push(
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: block,
-                font: FONT,
-                size: FONT_SIZE,
-              }),
-            ],
-            alignment: AlignmentType.BOTH,
-            spacing: defaultSpacing,
-          }),
-        );
+            );
+            continue;
+          }
+
+          // All other paragraphs (including sub-headings ending with ":")
+          paragraphs.push(
+            new Paragraph({
+              children: [
+                new TextRun({ text: block, font: FONT, size: FONT_SIZE }),
+              ],
+              alignment: AlignmentType.BOTH,
+              spacing: defaultSpacing,
+            }),
+          );
+        }
       }
     }
   }
