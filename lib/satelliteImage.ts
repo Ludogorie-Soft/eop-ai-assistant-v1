@@ -4,6 +4,7 @@
  */
 
 const STREET_VIEW_BASE = "https://maps.googleapis.com/maps/api/streetview";
+const FETCH_TIMEOUT_MS = 15000;
 const IMAGE_WIDTH = 800;
 const IMAGE_HEIGHT = 500;
 
@@ -201,9 +202,16 @@ export async function fetchStreetViewImage(
     key: apiKey,
   });
   try {
+    const metaController = new AbortController();
+    const metaTimer = setTimeout(
+      () => metaController.abort(),
+      FETCH_TIMEOUT_MS,
+    );
     const metaRes = await fetch(
       `${STREET_VIEW_BASE}/metadata?${metaParams.toString()}`,
+      { signal: metaController.signal },
     );
+    clearTimeout(metaTimer);
     if (metaRes.ok) {
       const meta = (await metaRes.json()) as { status?: string };
       if (meta.status !== "OK") {
@@ -214,7 +222,7 @@ export async function fetchStreetViewImage(
       }
     }
   } catch {
-    // metadata check failed, try fetching anyway
+    // metadata check failed (timeout or network error), try fetching anyway
   }
 
   const params = new URLSearchParams({
@@ -228,7 +236,10 @@ export async function fetchStreetViewImage(
   const url = `${STREET_VIEW_BASE}?${params.toString()}`;
 
   try {
-    const res = await fetch(url);
+    const imgController = new AbortController();
+    const imgTimer = setTimeout(() => imgController.abort(), FETCH_TIMEOUT_MS);
+    const res = await fetch(url, { signal: imgController.signal });
+    clearTimeout(imgTimer);
     if (!res.ok) {
       console.error(
         `[streetView] Google Street View API error: ${res.status} ${res.statusText}`,

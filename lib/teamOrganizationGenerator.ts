@@ -46,9 +46,9 @@ function parseMatcherJson(content: string): PositionMatch[] {
     return parsed
       .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
       .map((item) => ({
-        docPosition: String((item as any).docPosition ?? ''),
-        matchedTemplate: String((item as any).matchedTemplate ?? 'NONE'),
-        confidence: typeof (item as any).confidence === 'number' ? (item as any).confidence : 0,
+        docPosition: String(item.docPosition ?? ''),
+        matchedTemplate: String(item.matchedTemplate ?? 'NONE'),
+        confidence: typeof item.confidence === 'number' ? item.confidence : 0,
       }));
   } catch {
     return [];
@@ -91,9 +91,9 @@ function parseReverseMatcherJson(content: string): ReverseMatch[] {
     return parsed
       .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
       .map((item) => ({
-        templateTitle: String((item as any).templateTitle ?? ''),
-        matchedDocPosition: String((item as any).matchedDocPosition ?? 'NONE'),
-        confidence: typeof (item as any).confidence === 'number' ? (item as any).confidence : 0,
+        templateTitle: String(item.templateTitle ?? ''),
+        matchedDocPosition: String(item.matchedDocPosition ?? 'NONE'),
+        confidence: typeof item.confidence === 'number' ? item.confidence : 0,
       }));
   } catch {
     return [];

@@ -119,8 +119,10 @@ export async function extractDocText(buffer: Buffer): Promise<string> {
       inputPath,
     ]);
     return stdout.trim();
-  } catch {
-    return '';
+  } catch (err) {
+    throw new Error(
+      `Грешка при четене на .doc файл: ${err instanceof Error ? err.message : String(err)}`
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
