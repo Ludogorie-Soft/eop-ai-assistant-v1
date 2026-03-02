@@ -348,7 +348,9 @@ export async function fetchCaisWithPuppeteerAndStorage(url: string): Promise<str
       try {
         await uploadToStorage(tenderKey, filename, file.buffer, contentType);
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         console.error(`Upload failed for ${filename}:`, err);
+        parts.push(`--- Грешка при качване на ${filename} ---\n\n${msg}`);
       }
     }
   } finally {
@@ -356,6 +358,7 @@ export async function fetchCaisWithPuppeteerAndStorage(url: string): Promise<str
   }
 
   const storedFiles = await listTenderFiles(tenderKey);
+  const extractErrors: string[] = [];
 
   for (const { name, path } of storedFiles) {
     try {
@@ -366,8 +369,18 @@ export async function fetchCaisWithPuppeteerAndStorage(url: string): Promise<str
         parts.push(`--- ${name} ---\n\n${text}`);
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       console.error(`Extract failed for ${name}:`, err);
+      extractErrors.push(`${name}: ${msg}`);
     }
+  }
+
+  if (extractErrors.length > 0) {
+    parts.push(`--- Грешки при извличане на текст ---\n\n${extractErrors.join('\n')}`);
+  }
+
+  if (parts.length === 0) {
+    throw new Error('Не беше извлечен текст от страницата или прикачените документи. Проверете URL адреса и опитайте отново.');
   }
 
   let result = parts.join('\n\n');

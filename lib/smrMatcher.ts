@@ -56,7 +56,7 @@ export async function matchKssToSmr(
   kssName: string,
   smrTemplates: SmrTemplate[],
 ): Promise<MatchResult> {
-  if (!kssName.trim()) {
+  if (typeof kssName !== 'string' || !kssName.trim()) {
     return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
   }
   if (smrTemplates.length === 0) {

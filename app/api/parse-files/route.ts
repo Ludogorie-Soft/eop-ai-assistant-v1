@@ -55,6 +55,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ text: mergedText, files: results });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to parse files';
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
