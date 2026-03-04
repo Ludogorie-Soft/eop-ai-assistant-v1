@@ -9,8 +9,8 @@ export interface RequiredPosition {
 }
 
 const SECTION_START_PATTERNS = [
-  /(?:персонал|ръководен\s+състав|професионална\s+компетентност|минимален\s+състав|ключови\s+експерти|екип\s+за\s+изпълнение)[^\n]*/i,
-  /участникът\s+(?:следва|трябва)\s+да\s+(?:разполага|осигури|предложи)\s+с\s+(?:персонал|екип|ключови)/i,
+  /(?:персонал|ръководен\s+(?:екип|състав)|минимален\s+(?:екип|състав)|професионална\s+компетентност|ключови\s+експерти|екип\s+за\s+изпълнение)[^\n]*/i,
+  /участникът\s+(?:следва|трябва)\s+да\s+(?:разполага|осигури|предложи)\s+с\s+(?:\S+\s+)?(?:персонал|екип|ключови)/i,
   /изисквания\s+(?:към|за)\s+(?:персонал|екип|ключови\s+експерти)/i,
 ];
 
@@ -107,46 +107,51 @@ export function extractRequiredPositions(rawText: string): RequiredPosition[] {
   if (!rawText?.trim()) return [];
 
   const lines = rawText.split(/\r?\n/);
-  let sectionStart = -1;
 
-  // Find the start of the personnel requirements section
+  // Collect ALL candidate section starts (pattern may fire on false positives earlier in the doc)
+  const sectionStarts: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (SECTION_START_PATTERNS.some((p) => p.test(line))) {
-      sectionStart = i;
-      break;
+    if (SECTION_START_PATTERNS.some((p) => p.test(lines[i]))) {
+      sectionStarts.push(i);
     }
   }
 
-  if (sectionStart === -1) return [];
+  if (sectionStarts.length === 0) return [];
 
-  // Find the end of the section
-  let sectionEnd = lines.length;
-  for (let i = sectionStart + 1; i < lines.length; i++) {
-    if (SECTION_END_PATTERNS.some((p) => p.test(lines[i]))) {
-      sectionEnd = i;
-      break;
-    }
-  }
-
-  // Cap section size
-  sectionEnd = Math.min(sectionEnd, sectionStart + 200);
-
-  const positions: RequiredPosition[] = [];
-  const sectionLines = lines.slice(sectionStart, sectionEnd);
-
-  for (let i = 0; i < sectionLines.length; i++) {
-    if (isRoleLine(sectionLines[i])) {
-      const name = extractRoleName(sectionLines[i]);
-      const followingLines = sectionLines.slice(i + 1, i + 15);
-      const requirements = extractRequirements(sectionLines[i], followingLines);
-
-      if (name.length >= 3) {
-        positions.push({ name, requirements });
+  // Try each candidate in order; use the first one that actually contains role lines
+  for (const sectionStart of sectionStarts) {
+    // Find the end of this section
+    let sectionEnd = lines.length;
+    for (let i = sectionStart + 1; i < lines.length; i++) {
+      if (SECTION_END_PATTERNS.some((p) => p.test(lines[i]))) {
+        sectionEnd = i;
+        break;
       }
     }
+    // Cap section size (increased to handle large docs with many preamble lines)
+    sectionEnd = Math.min(sectionEnd, sectionStart + 300);
+
+    const sectionLines = lines.slice(sectionStart, sectionEnd);
+
+    // Skip this candidate if no role lines are found within it
+    if (!sectionLines.some((l) => isRoleLine(l))) continue;
+
+    const positions: RequiredPosition[] = [];
+    for (let i = 0; i < sectionLines.length; i++) {
+      if (isRoleLine(sectionLines[i])) {
+        const name = extractRoleName(sectionLines[i]);
+        const followingLines = sectionLines.slice(i + 1, i + 15);
+        const requirements = extractRequirements(sectionLines[i], followingLines);
+
+        if (name.length >= 3) {
+          positions.push({ name, requirements });
+        }
+      }
+    }
+
+    if (positions.length > 0) return positions;
   }
 
-  return positions;
+  return [];
 }
 

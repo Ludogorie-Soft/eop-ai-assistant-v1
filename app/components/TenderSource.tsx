@@ -60,19 +60,27 @@ export function TenderSource({ rawText, onRawTextUpdate }: TenderSourceProps) {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
 
+    const docFiles = files.filter((f) =>
+      f.type === 'application/msword' || f.name.toLowerCase().endsWith('.doc')
+    );
+    if (docFiles.length > 0) {
+      setUploadError(
+        'Файлове .doc не се поддържат. Моля, конвертирайте ги в .docx или .pdf и опитайте отново.'
+      );
+      return;
+    }
+
     const valid = files.filter(
       (f) =>
         f.type === 'application/pdf' ||
         f.name.toLowerCase().endsWith('.pdf') ||
-        f.type === 'application/msword' ||
-        f.name.toLowerCase().endsWith('.doc') ||
         f.type ===
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
         f.name.toLowerCase().endsWith('.docx')
     );
 
     if (valid.length !== files.length) {
-      setUploadError('Only PDF, DOC and DOCX files are allowed');
+      setUploadError('Разрешени са само PDF и DOCX файлове.');
       return;
     }
 
@@ -147,12 +155,15 @@ export function TenderSource({ rawText, onRawTextUpdate }: TenderSourceProps) {
 
         <div>
           <label className="block text-sm font-medium text-neutral-700">
-            Качване на файлове (PDF/DOC/DOCX)
+            Качване на файлове (PDF/DOCX)
           </label>
+          <p className="mt-0.5 text-xs text-neutral-500">
+            Поддържат се PDF и DOCX. За .doc файлове — конвертирайте ги в .docx преди качване.
+          </p>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             multiple
             onChange={handleFileSelect}
             className="mt-1 hidden"

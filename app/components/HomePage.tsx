@@ -169,6 +169,7 @@ export function HomePage({
           rawText={rawText}
           teamOrganizationText={teamOrganizationText}
           onTeamOrganizationUpdate={setTeamOrganizationText}
+          smrResults={smrResults}
         />
         <GenerateDocxButton
           introductionText={introductionText}

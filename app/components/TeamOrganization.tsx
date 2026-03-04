@@ -1,17 +1,20 @@
 'use client';
 
 import { useState } from 'react';
+import type { SmrResult } from './KssSmrSection';
 
 interface TeamOrganizationProps {
   rawText: string;
   teamOrganizationText: string;
   onTeamOrganizationUpdate: (text: string) => void;
+  smrResults?: SmrResult[];
 }
 
 export function TeamOrganization({
   rawText,
   teamOrganizationText,
   onTeamOrganizationUpdate,
+  smrResults = [],
 }: TeamOrganizationProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +30,10 @@ export function TeamOrganization({
       const res = await fetch('/api/generate-team-organization', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceText: rawText }),
+        body: JSON.stringify({
+          sourceText: rawText,
+          kssNames: smrResults.map((r) => r.kssName).filter(Boolean),
+        }),
       });
       const text = await res.text();
       let data: { teamOrganization?: string; error?: string } = {};

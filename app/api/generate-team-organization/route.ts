@@ -10,7 +10,7 @@ import { downloadLatestTeamTemplate } from '@/lib/teamTemplateStorage';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { sourceText } = body as { sourceText?: string };
+    const { sourceText, kssNames } = body as { sourceText?: string; kssNames?: string[] };
     if (!sourceText || typeof sourceText !== 'string') {
       return NextResponse.json(
         { error: 'Source text is required' },
@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
     const teamOrganization = await generateTeamOrganization(
       sourceText,
       templateBuffer,
+      Array.isArray(kssNames) ? kssNames : undefined,
     );
 
     return NextResponse.json({ teamOrganization });
