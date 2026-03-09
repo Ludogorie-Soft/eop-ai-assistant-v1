@@ -14,6 +14,12 @@ import {
   AlignmentType,
   LineRuleType,
   BorderStyle,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  ShadingType,
+  TableBorders,
 } from "docx";
 import { htmlToDocxElements } from "./htmlToDocxBody";
 
@@ -109,6 +115,89 @@ export type SmrResultForDocx = {
   htmlBody?: string;
 };
 
+const SMR_GREEN = "1F5C2E";
+const SMR_BORDER = { style: BorderStyle.DASHED, size: 6, color: SMR_GREEN };
+
+/** Builds the 3-row resource table that appears under each SMR technology */
+function createSmrResourceTable(title: string): Table {
+  const labelCell = (text: string) =>
+    new TableCell({
+      width: { size: 35, type: WidthType.PERCENTAGE },
+      borders: {
+        top: SMR_BORDER,
+        bottom: SMR_BORDER,
+        left: SMR_BORDER,
+        right: SMR_BORDER,
+      },
+      children: [
+        new Paragraph({
+          children: [
+            new TextRun({ text, font: FONT, size: FONT_SIZE, bold: true }),
+          ],
+          spacing: { line: LINE_SPACING, lineRule: LineRuleType.AT_LEAST, before: 60, after: 60 },
+        }),
+      ],
+    });
+
+  const emptyCell = () =>
+    new TableCell({
+      width: { size: 65, type: WidthType.PERCENTAGE },
+      borders: {
+        top: SMR_BORDER,
+        bottom: SMR_BORDER,
+        left: SMR_BORDER,
+        right: SMR_BORDER,
+      },
+      children: [
+        new Paragraph({
+          children: [],
+          spacing: { line: LINE_SPACING, lineRule: LineRuleType.AT_LEAST, before: 60, after: 60 },
+        }),
+      ],
+    });
+
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: TableBorders.NONE,
+    rows: [
+      // Header row – full-width dark green cell with bold italic white title
+      new TableRow({
+        children: [
+          new TableCell({
+            columnSpan: 2,
+            shading: { fill: SMR_GREEN, type: ShadingType.CLEAR, color: "auto" },
+            borders: {
+              top: { style: BorderStyle.SINGLE, size: 6, color: SMR_GREEN },
+              bottom: { style: BorderStyle.SINGLE, size: 6, color: SMR_GREEN },
+              left: { style: BorderStyle.SINGLE, size: 6, color: SMR_GREEN },
+              right: { style: BorderStyle.SINGLE, size: 6, color: SMR_GREEN },
+            },
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [
+                  new TextRun({
+                    text: title,
+                    font: FONT,
+                    size: FONT_SIZE,
+                    bold: true,
+                    italics: true,
+                    color: "FFFFFF",
+                  }),
+                ],
+                spacing: { line: LINE_SPACING, lineRule: LineRuleType.AT_LEAST, before: 60, after: 60 },
+              }),
+            ],
+          }),
+        ],
+      }),
+      new TableRow({ children: [labelCell("Ангажирани строителни лица (брой и квалификация):"), emptyCell()] }),
+      new TableRow({ children: [labelCell("Технически ресурси - Механизация:"), emptyCell()] }),
+      new TableRow({ children: [labelCell("Технически ресурси – Материали:"), emptyCell()] }),
+    ],
+  });
+}
+
 export async function generateTenderDocx(
   introductionText: string | undefined,
   rawText?: string,
@@ -116,7 +205,7 @@ export async function generateTenderDocx(
   satelliteImage?: { data: Buffer; width: number; height: number },
   teamOrganizationText?: string,
 ): Promise<{ buffer: Buffer; filename: string }> {
-  const paragraphs: Paragraph[] = [];
+  const paragraphs: (Paragraph | Table)[] = [];
   const hasIntroduction = Boolean(introductionText?.trim());
   const hasTeamOrg = Boolean(teamOrganizationText?.trim());
   const hasSmr = Boolean(smrResults?.length);
@@ -268,6 +357,16 @@ export async function generateTenderDocx(
             alignment: AlignmentType.BOTH,
             spacing: { ...defaultSpacing, before: 0 },
           }),
+        );
+      }
+      // Resource table with empty right cells for manual completion (only for high-confidence matches)
+      if (r.confidence >= 0.7) {
+        paragraphs.push(
+          new Paragraph({ children: [], spacing: { line: LINE_SPACING, lineRule: LineRuleType.AT_LEAST, before: 100, after: 0 } }),
+        );
+        paragraphs.push(createSmrResourceTable(r.matchedTitle ?? r.kssName));
+        paragraphs.push(
+          new Paragraph({ children: [], spacing: { line: LINE_SPACING, lineRule: LineRuleType.AT_LEAST, before: 0, after: 200 } }),
         );
       }
     }
