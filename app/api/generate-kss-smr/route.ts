@@ -1,15 +1,15 @@
 /**
  * KSS → SMR generation API.
  * POST multipart: kssFile (Excel) only.
- * SMR template is fetched from Supabase Storage (smr-templates bucket).
+ * SMR templates are loaded from the DB (offer_sections with type smr_technology),
+ * built automatically from uploaded offers.
  * Returns { results: SmrResult[] }.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { parseKssExcel, type KssItem } from "@/lib/kssParser";
-import { parseSmrTemplateDocx } from "@/lib/smrTemplateParser";
 import { generateSmrTextsForKss } from "@/lib/kssSmrGenerator";
-import { downloadLatestTemplate } from "@/lib/templateStorage";
+import { loadSmrTemplatesFromOffers } from "@/lib/offerStorage";
 
 const EXCEL_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -59,40 +59,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const kssItems = allKssItems;
+    // Load SMR templates from the DB (built from uploaded offers)
+    const smrTemplates = await loadSmrTemplatesFromOffers();
 
-    let docxBuf: Buffer | null = null;
-
-    try {
-      docxBuf = await downloadLatestTemplate();
-    } catch (err) {
-      console.error("[generate-kss-smr] Supabase template fetch failed:", err);
-    }
-
-    if (!docxBuf) {
-      return NextResponse.json(
-        {
-          error:
-            'Няма качен шаблон СМР в Supabase. Качете шаблон от страница „Шаблони".',
-        },
-        { status: 400 },
-      );
-    }
-
-    console.log("[generate-kss-smr] Using SMR template from Supabase Storage");
-
-    const smrTemplates = await parseSmrTemplateDocx(docxBuf);
     if (smrTemplates.length === 0) {
       return NextResponse.json(
         {
           error:
-            "No SMR blocks found in the template DOCX. Ensure the file has headings (Heading 1/2, etc.).",
+            'Няма налични СМР шаблони. Качете поне една оферта в секция „Оферти", за да се генерират автоматично.',
         },
         { status: 400 },
       );
     }
 
-    const results = await generateSmrTextsForKss(kssItems, smrTemplates);
+    console.log(
+      `[generate-kss-smr] Using ${smrTemplates.length} SMR templates from offer DB`
+    );
+
+    const results = await generateSmrTextsForKss(allKssItems, smrTemplates);
 
     const response: { results: typeof results; warning?: string } = { results };
     if (columnFallbackUsed) {

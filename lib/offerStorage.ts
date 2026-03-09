@@ -6,6 +6,7 @@
 
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { ParsedOfferSection, OfferImageMap } from "./offerParser";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, LineRuleType } from "docx";
 
 const BUCKET = "offer-uploads";
 const IMAGES_PREFIX = "images/";
@@ -262,6 +263,11 @@ export async function saveOffer(
   if (sectionsErr)
     throw new Error(`DB insert sections failed: ${sectionsErr.message}`);
 
+  // Regenerate the SMR template DOCX file (non-blocking — don't fail the upload)
+  generateAndUploadSmrTemplateDocx().catch((err) =>
+    console.warn("[offerStorage] Template DOCX generation failed:", err)
+  );
+
   return {
     id: offerId,
     name: filename,
@@ -320,6 +326,11 @@ export async function deleteOffer(offerId: string): Promise<void> {
   if (offer?.storage_path) {
     await client.storage.from(BUCKET).remove([offer.storage_path]);
   }
+
+  // Regenerate the SMR template DOCX file (templates may have changed)
+  generateAndUploadSmrTemplateDocx().catch((err) =>
+    console.warn("[offerStorage] Template DOCX generation failed:", err)
+  );
 }
 
 /**
@@ -405,10 +416,164 @@ export async function reparseOffer(
     .update({ section_count: resolvedSections.length })
     .eq("id", offerId);
 
+  // Regenerate the SMR template DOCX file
+  generateAndUploadSmrTemplateDocx().catch((err) =>
+    console.warn("[offerStorage] Template DOCX generation failed:", err)
+  );
+
   return {
     sectionCount: resolvedSections.length,
     sectionTypes: resolvedSections.map((s) => ({ type: s.section_type, title: s.title })),
   };
+}
+
+/**
+ * Load all unique smr_technology sections from the DB as SmrTemplate-compatible
+ * objects. This replaces the old manually-uploaded "Шаблони СМР.docx" approach —
+ * the templates now grow automatically as offers are uploaded.
+ */
+export async function loadSmrTemplatesFromOffers(): Promise<
+  { title: string; body: string; htmlBody: string }[]
+> {
+  const client = getClient();
+
+  const { data, error } = await client
+    .from("offer_sections")
+    .select("title, plain_text, html_content")
+    .eq("section_type", "smr_technology")
+    .order("created_at", { ascending: true });
+
+  if (error) throw new Error(`Failed to load SMR templates: ${error.message}`);
+  if (!data || data.length === 0) return [];
+
+  // Deduplicate by normalized title — keep the first (oldest) version
+  const seen = new Set<string>();
+  const templates: { title: string; body: string; htmlBody: string }[] = [];
+
+  for (const row of data) {
+    const norm = normalizeTitle(row.title);
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    templates.push({
+      title: row.title,
+      body: row.plain_text,
+      htmlBody: row.html_content,
+    });
+  }
+
+  return templates;
+}
+
+const TEMPLATES_BUCKET = "smr-templates";
+const GENERATED_TEMPLATE_PATH = "auto_generated_smr_templates.docx";
+
+/**
+ * Generate a DOCX file containing all SMR templates from the DB and upload
+ * it to Supabase Storage for viewing/download. The file is overwritten each time.
+ */
+export async function generateAndUploadSmrTemplateDocx(): Promise<void> {
+  const templates = await loadSmrTemplatesFromOffers();
+  if (templates.length === 0) return;
+
+  const FONT = "Times New Roman";
+  const FONT_SIZE = 22; // 11pt in half-points
+
+  const children: Paragraph[] = [
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: "СМР Шаблони (автоматично генериран)",
+          bold: true,
+          font: FONT,
+          size: 28,
+        }),
+      ],
+      heading: HeadingLevel.HEADING_1,
+      spacing: { after: 300 },
+    }),
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: `Общо шаблони: ${templates.length} | Генериран: ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
+          font: FONT,
+          size: 20,
+          italics: true,
+        }),
+      ],
+      spacing: { after: 400 },
+    }),
+  ];
+
+  for (let i = 0; i < templates.length; i++) {
+    const t = templates[i];
+
+    // Section separator
+    if (i > 0) {
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: "─".repeat(60), font: FONT, size: FONT_SIZE })],
+          spacing: { before: 300, after: 300 },
+        })
+      );
+    }
+
+    // Title
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: `${i + 1}. ${t.title}`,
+            bold: true,
+            font: FONT,
+            size: 24,
+          }),
+        ],
+        heading: HeadingLevel.HEADING_2,
+        spacing: { before: 200, after: 200 },
+      })
+    );
+
+    // Body text (plain text, split into paragraphs)
+    const lines = t.body.split(/\n+/).filter((l) => l.trim());
+    for (const line of lines) {
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: line.trim(), font: FONT, size: FONT_SIZE })],
+          spacing: {
+            line: 240,
+            lineRule: LineRuleType.AT_LEAST,
+            before: 60,
+            after: 60,
+          },
+        })
+      );
+    }
+  }
+
+  const doc = new Document({
+    sections: [{ children }],
+  });
+
+  const buffer = await Packer.toBuffer(doc);
+
+  const client = getClient();
+  // Remove old file first (upsert doesn't work for storage replace)
+  await client.storage.from(TEMPLATES_BUCKET).remove([GENERATED_TEMPLATE_PATH]);
+  const { error } = await client.storage
+    .from(TEMPLATES_BUCKET)
+    .upload(GENERATED_TEMPLATE_PATH, Buffer.from(buffer), {
+      contentType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      upsert: true,
+    });
+
+  if (error) {
+    console.warn(`[offerStorage] Failed to upload generated template: ${error.message}`);
+  } else {
+    console.log(
+      `[offerStorage] Generated SMR template DOCX uploaded (${templates.length} templates)`
+    );
+  }
 }
 
 /** Download original DOCX for a specific offer */
