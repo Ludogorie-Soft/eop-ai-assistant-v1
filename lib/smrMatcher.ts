@@ -11,6 +11,7 @@ import {
   SMR_MATCHER_SYSTEM_PROMPT,
   SMR_MATCHER_USER_PROMPT_TEMPLATE,
 } from "./prompts/smrMatcherPrompt";
+import { searchSimilarSections } from "./offerEmbeddings";
 
 export type MatchResult = {
   text: string;
@@ -97,6 +98,21 @@ export async function matchKssToSmr(
 
   // Reject if LLM returned NONE or confidence is below threshold
   if (isNoneMatch || confidence < 75) {
+    // RAG fallback: try to find a matching section from past offers
+    try {
+      const ragExamples = await searchSimilarSections(kssName, 'smr_technology', 1);
+      if (ragExamples.length > 0 && ragExamples[0].similarity > 0.82) {
+        const ex = ragExamples[0];
+        return {
+          text: ex.plain_text,
+          confidence: Math.round(ex.similarity * 100),
+          matchedTitle: `[от оферта] ${ex.title}`,
+          htmlBody: ex.html_content,
+        };
+      }
+    } catch {
+      // RAG not available — proceed normally
+    }
     return {
       text: "[не е намерен]",
       confidence: isNoneMatch ? 0 : confidence,

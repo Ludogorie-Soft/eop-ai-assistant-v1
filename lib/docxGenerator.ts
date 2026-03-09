@@ -22,6 +22,7 @@ import {
   TableBorders,
 } from "docx";
 import { htmlToDocxElements } from "./htmlToDocxBody";
+import { resolveHtmlImages } from "./offerStorage";
 
 const FONT = "Times New Roman";
 const FONT_SIZE = 22; // 11pt in half-points
@@ -345,10 +346,14 @@ export async function generateTenderDocx(
       );
       if (r.htmlBody) {
         // Use rich HTML body: preserves bold, italic, bullet lists, and images from the SMR template.
+        // If the HTML contains offer-image URLs, resolve them to base64 first so htmlToDocxElements can embed them.
         // When richElements is empty (e.g. the section body is a flowchart table with no extractable
         // images), we output nothing rather than falling back to the garbage plain-text version
         // of the table cells (decision-tree labels like "да/не/?/КРАЙ").
-        const richElements = htmlToDocxElements(r.htmlBody);
+        const resolvedHtml = r.htmlBody.includes("/api/admin/offer-images/")
+          ? await resolveHtmlImages(r.htmlBody).catch(() => r.htmlBody!)
+          : r.htmlBody;
+        const richElements = htmlToDocxElements(resolvedHtml);
         paragraphs.push(...richElements);
       } else {
         paragraphs.push(

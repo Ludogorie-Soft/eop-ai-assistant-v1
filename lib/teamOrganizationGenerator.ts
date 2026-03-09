@@ -16,6 +16,20 @@ import {
   TEAM_PARAPHRASER_SYSTEM_PROMPT,
   TEAM_PARAPHRASER_USER_PROMPT_TEMPLATE,
 } from './prompts/teamPrompt';
+import { searchSimilarSections } from './offerEmbeddings';
+
+/** Fetch RAG context for team organization from past offers. Fails silently. */
+async function fetchTeamRagContext(positionName: string): Promise<string> {
+  try {
+    const examples = await searchSimilarSections(positionName, 'team_organization', 2);
+    if (!examples.length) return '';
+    return examples
+      .map((e, i) => `--- Пример ${i + 1} (от минала оферта, длъжност: ${e.title}) ---\n${e.plain_text.slice(0, 2000)}`)
+      .join('\n\n');
+  } catch {
+    return '';
+  }
+}
 
 interface PositionMatch {
   docPosition: string;
@@ -135,10 +149,21 @@ async function paraphrasePosition(
   kssContext: string,
 ): Promise<string> {
   const llm = createLLM({ temperature: 0.2, maxTokens: 16384 });
-  const prompt = ChatPromptTemplate.fromMessages([
-    ['system', TEAM_PARAPHRASER_SYSTEM_PROMPT],
-    ['human', TEAM_PARAPHRASER_USER_PROMPT_TEMPLATE],
-  ]);
+
+  // Fetch RAG examples from past offers (non-blocking, fails silently)
+  const ragContext = await fetchTeamRagContext(positionName);
+
+  const messages: [string, string][] = [['system', TEAM_PARAPHRASER_SYSTEM_PROMPT]];
+  if (ragContext) {
+    messages.push([
+      'human',
+      `ПРИМЕРИ ОТ ПРЕДИШНИ ОФЕРТИ (само за стилов ориентир — НЕ ги преписвай):\n\n${ragContext}`,
+    ]);
+    messages.push(['ai', 'Разбрах. Ще използвам тези примери само за стил и структура.']);
+  }
+  messages.push(['human', TEAM_PARAPHRASER_USER_PROMPT_TEMPLATE]);
+
+  const prompt = ChatPromptTemplate.fromMessages(messages);
 
   const chain = prompt.pipe(llm);
   const response = await chain.invoke({

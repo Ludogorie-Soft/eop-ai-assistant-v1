@@ -13,6 +13,21 @@ import {
   PROJECT_SOLUTION_SYSTEM_PROMPT,
   PROJECT_SOLUTION_USER_PROMPT_TEMPLATE,
 } from './prompts/introductionPrompt';
+import { searchSimilarSections } from './offerEmbeddings';
+
+/** Fetch RAG context from stored offer sections. Fails silently. */
+async function fetchIntroductionRagContext(sourceText: string): Promise<string> {
+  try {
+    const examples = await searchSimilarSections(sourceText.slice(0, 2000), 'introduction', 3);
+    if (!examples.length) return '';
+    const parts = examples.map((e, i) =>
+      `--- Пример ${i + 1} (от минала оферта) ---\n${e.plain_text.slice(0, 3000)}`
+    );
+    return parts.join('\n\n');
+  } catch {
+    return '';
+  }
+}
 
 export async function generateIntroduction(sourceText: string): Promise<string> {
   if (!sourceText?.trim()) {
@@ -21,15 +36,25 @@ export async function generateIntroduction(sourceText: string): Promise<string> 
 
   const cleanedSource = cleanSourceText(sourceText);
 
+  // Fetch RAG examples from past offers (non-blocking, fails silently)
+  const ragContext = await fetchIntroductionRagContext(cleanedSource);
+
   const llm = createLLM({
     temperature: 0.2,
     maxTokens: 16384,
   });
 
-  const prompt = ChatPromptTemplate.fromMessages([
-    ['system', INTRODUCTION_SYSTEM_PROMPT],
-    ['human', INTRODUCTION_USER_PROMPT_TEMPLATE],
-  ]);
+  const messages: [string, string][] = [['system', INTRODUCTION_SYSTEM_PROMPT]];
+  if (ragContext) {
+    messages.push([
+      'human',
+      `ПРИМЕРИ ОТ ПРЕДИШНИ ОФЕРТИ (използвай като стилов ориентир — НЕ ги преписвай):\n\n${ragContext}`,
+    ]);
+    messages.push(['ai', 'Разбрах. Ще използвам тези примери само за стил и структура, без да ги копирам.']);
+  }
+  messages.push(['human', INTRODUCTION_USER_PROMPT_TEMPLATE]);
+
+  const prompt = ChatPromptTemplate.fromMessages(messages);
 
   const chain = prompt.pipe(llm);
   const response = await chain.invoke({
