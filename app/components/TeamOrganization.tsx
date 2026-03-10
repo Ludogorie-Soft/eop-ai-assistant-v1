@@ -21,7 +21,7 @@ export function TeamOrganization({
 
   const handleGenerate = async () => {
     if (!rawText.trim()) {
-      setError('Първо заредете данни от CAIS или качете файлове.');
+      setError('Първо качете файлове.');
       return;
     }
     setLoading(true);

@@ -1,6 +1,6 @@
 /**
  * Extract "Текущо състояние" / "Съществуващо положение" and "Проектно решение" verbatim from raw text.
- * Searches across all source content (CAIS + attached files).
+ * Searches across all source content (attached files).
  * Supports alternative headings used in technical specs (e.g. "СЪЩЕСТВУВАЩО ПОЛОЖЕНИЕ").
  */
 
