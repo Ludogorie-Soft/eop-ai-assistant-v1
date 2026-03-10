@@ -12,6 +12,11 @@ import {
   ImageRun,
   AlignmentType,
   LineRuleType,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  BorderStyle,
 } from "docx";
 
 const FONT = "Times New Roman";
@@ -456,6 +461,139 @@ function parseListBlock(listHtml: string): Paragraph[] {
 }
 
 // ---------------------------------------------------------------------------
+// Table parsing
+// ---------------------------------------------------------------------------
+
+const TABLE_BORDER = {
+  style: BorderStyle.SINGLE,
+  size: 4,
+  color: "000000",
+};
+
+/**
+ * Parse an HTML `<table>` block into a docx Table object.
+ * Handles colspan, bold/italic inline content in cells, and images.
+ */
+function parseTableBlock(tableHtml: string): (Paragraph | Table)[] {
+  const rows: TableRow[] = [];
+
+  // Extract <tr> blocks
+  const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr\s*>/gi;
+  let trMatch: RegExpExecArray | null;
+
+  // First pass: determine max column count (accounting for colspan)
+  let maxCols = 0;
+  const trMatches: string[] = [];
+  while ((trMatch = trRegex.exec(tableHtml)) !== null) {
+    trMatches.push(trMatch[1]);
+    const cellRe = /<t[dh][^>]*>/gi;
+    let cols = 0;
+    let cellTag: RegExpExecArray | null;
+    while ((cellTag = cellRe.exec(trMatch[1])) !== null) {
+      const csMatch = cellTag[0].match(/colspan\s*=\s*["']?(\d+)/i);
+      cols += csMatch ? parseInt(csMatch[1], 10) : 1;
+    }
+    if (cols > maxCols) maxCols = cols;
+  }
+
+  if (maxCols === 0) return [];
+
+  for (const trContent of trMatches) {
+    const cells: TableCell[] = [];
+    const cellRegex = /<(t[dh])([^>]*)>([\s\S]*?)<\/t[dh]\s*>/gi;
+    let cellMatch: RegExpExecArray | null;
+    let colsInRow = 0;
+
+    while ((cellMatch = cellRegex.exec(trContent)) !== null) {
+      const attrs = cellMatch[2];
+      const cellContent = cellMatch[3];
+      const csMatch = attrs.match(/colspan\s*=\s*["']?(\d+)/i);
+      const colspan = csMatch ? parseInt(csMatch[1], 10) : 1;
+      colsInRow += colspan;
+
+      // Parse cell content — extract inline text from nested <p> tags or raw content
+      const cellChildren: Paragraph[] = [];
+      const pRegex = /<p[^>]*>([\s\S]*?)<\/p\s*>/gi;
+      let pMatch: RegExpExecArray | null;
+      let hasParagraphs = false;
+
+      while ((pMatch = pRegex.exec(cellContent)) !== null) {
+        hasParagraphs = true;
+        const runs = parseInline(pMatch[1]);
+        if (runs.length > 0) {
+          cellChildren.push(
+            new Paragraph({
+              children: runs,
+              spacing: { line: 240, lineRule: LineRuleType.AT_LEAST, before: 40, after: 40 },
+            }),
+          );
+        }
+      }
+
+      if (!hasParagraphs) {
+        // No <p> tags — parse the raw cell content directly
+        const runs = parseInline(cellContent);
+        if (runs.length > 0) {
+          cellChildren.push(
+            new Paragraph({
+              children: runs,
+              spacing: { line: 240, lineRule: LineRuleType.AT_LEAST, before: 40, after: 40 },
+            }),
+          );
+        }
+      }
+
+      // Ensure at least one empty paragraph (DOCX requires non-empty cells)
+      if (cellChildren.length === 0) {
+        cellChildren.push(new Paragraph({ children: [] }));
+      }
+
+      cells.push(
+        new TableCell({
+          children: cellChildren,
+          columnSpan: colspan > 1 ? colspan : undefined,
+          borders: {
+            top: TABLE_BORDER,
+            bottom: TABLE_BORDER,
+            left: TABLE_BORDER,
+            right: TABLE_BORDER,
+          },
+        }),
+      );
+    }
+
+    // Pad row if it has fewer columns than max (for rows without colspan)
+    while (colsInRow < maxCols) {
+      cells.push(
+        new TableCell({
+          children: [new Paragraph({ children: [] })],
+          borders: {
+            top: TABLE_BORDER,
+            bottom: TABLE_BORDER,
+            left: TABLE_BORDER,
+            right: TABLE_BORDER,
+          },
+        }),
+      );
+      colsInRow++;
+    }
+
+    if (cells.length > 0) {
+      rows.push(new TableRow({ children: cells }));
+    }
+  }
+
+  if (rows.length === 0) return [];
+
+  return [
+    new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows,
+    }),
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -467,16 +605,15 @@ function parseListBlock(listHtml: string): Paragraph[] {
  *  - `<ul>/<ol><li>` as bullet paragraphs
  *  - standalone `<img src="data:...">` as centered ImageRun paragraphs
  *
- * Body `<table>` elements are intentionally SKIPPED. SMR templates often contain
- * decision-tree / flowchart tables whose cell text (да/не/?) produces garbage when
- * rendered as plain text. The meaningful spec content is always in <p> / <ul>.
+ * Body `<table>` elements are rendered as DOCX Table objects, preserving the
+ * original structure (rows, cells, colspan, bold/italic formatting).
  *
  * Returns an empty array for empty/null input.
  */
-export function htmlToDocxElements(html: string): Paragraph[] {
+export function htmlToDocxElements(html: string): (Paragraph | Table)[] {
   if (!html?.trim()) return [];
 
-  const elements: Paragraph[] = [];
+  const elements: (Paragraph | Table)[] = [];
 
   // Step 1: Extract all <table> blocks and replace with stable placeholders.
   // This prevents the main block regex from partially matching nested table content.
@@ -508,13 +645,18 @@ export function htmlToDocxElements(html: string): Paragraph[] {
       const imgPara = imgToParagraph(block);
       if (imgPara) elements.push(imgPara);
     } else if (/^__TABLE\d+__$/.test(block)) {
-      // Decision-tree cell text (да/не/?) is skipped, but embedded images are kept.
       const tIdx = parseInt(block.replace(/^__TABLE(\d+)__$/, "$1"), 10);
       const tHtml = tableBlocks[tIdx];
       if (tHtml) {
-        for (const m of tHtml.matchAll(/<img[^>]*\/?>/gi)) {
-          const imgPara = imgToParagraph(m[0]);
-          if (imgPara) elements.push(imgPara);
+        const tableElements = parseTableBlock(tHtml);
+        if (tableElements.length > 0) {
+          elements.push(...tableElements);
+        } else {
+          // Fallback: extract embedded images if table parsing yielded nothing
+          for (const m of tHtml.matchAll(/<img[^>]*\/?>/gi)) {
+            const imgPara = imgToParagraph(m[0]);
+            if (imgPara) elements.push(imgPara);
+          }
         }
       }
     }

@@ -15,11 +15,6 @@ import {
   LineRuleType,
   BorderStyle,
   Table,
-  TableRow,
-  TableCell,
-  WidthType,
-  ShadingType,
-  TableBorders,
 } from "docx";
 import { htmlToDocxElements } from "./htmlToDocxBody";
 import { resolveHtmlImages } from "./offerStorage";
@@ -116,88 +111,6 @@ export type SmrResultForDocx = {
   htmlBody?: string;
 };
 
-const SMR_GREEN = "1F5C2E";
-const SMR_BORDER = { style: BorderStyle.DASHED, size: 6, color: SMR_GREEN };
-
-/** Builds the 3-row resource table that appears under each SMR technology */
-function createSmrResourceTable(title: string): Table {
-  const labelCell = (text: string) =>
-    new TableCell({
-      width: { size: 35, type: WidthType.PERCENTAGE },
-      borders: {
-        top: SMR_BORDER,
-        bottom: SMR_BORDER,
-        left: SMR_BORDER,
-        right: SMR_BORDER,
-      },
-      children: [
-        new Paragraph({
-          children: [
-            new TextRun({ text, font: FONT, size: FONT_SIZE, bold: true }),
-          ],
-          spacing: { line: LINE_SPACING, lineRule: LineRuleType.AT_LEAST, before: 60, after: 60 },
-        }),
-      ],
-    });
-
-  const emptyCell = () =>
-    new TableCell({
-      width: { size: 65, type: WidthType.PERCENTAGE },
-      borders: {
-        top: SMR_BORDER,
-        bottom: SMR_BORDER,
-        left: SMR_BORDER,
-        right: SMR_BORDER,
-      },
-      children: [
-        new Paragraph({
-          children: [],
-          spacing: { line: LINE_SPACING, lineRule: LineRuleType.AT_LEAST, before: 60, after: 60 },
-        }),
-      ],
-    });
-
-  return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: TableBorders.NONE,
-    rows: [
-      // Header row – full-width dark green cell with bold italic white title
-      new TableRow({
-        children: [
-          new TableCell({
-            columnSpan: 2,
-            shading: { fill: SMR_GREEN, type: ShadingType.CLEAR, color: "auto" },
-            borders: {
-              top: { style: BorderStyle.SINGLE, size: 6, color: SMR_GREEN },
-              bottom: { style: BorderStyle.SINGLE, size: 6, color: SMR_GREEN },
-              left: { style: BorderStyle.SINGLE, size: 6, color: SMR_GREEN },
-              right: { style: BorderStyle.SINGLE, size: 6, color: SMR_GREEN },
-            },
-            children: [
-              new Paragraph({
-                alignment: AlignmentType.CENTER,
-                children: [
-                  new TextRun({
-                    text: title,
-                    font: FONT,
-                    size: FONT_SIZE,
-                    bold: true,
-                    italics: true,
-                    color: "FFFFFF",
-                  }),
-                ],
-                spacing: { line: LINE_SPACING, lineRule: LineRuleType.AT_LEAST, before: 60, after: 60 },
-              }),
-            ],
-          }),
-        ],
-      }),
-      new TableRow({ children: [labelCell("Ангажирани строителни лица (брой и квалификация):"), emptyCell()] }),
-      new TableRow({ children: [labelCell("Технически ресурси - Механизация:"), emptyCell()] }),
-      new TableRow({ children: [labelCell("Технически ресурси – Материали:"), emptyCell()] }),
-    ],
-  });
-}
 
 export async function generateTenderDocx(
   introductionText: string | undefined,
@@ -345,33 +258,28 @@ export async function generateTenderDocx(
         }),
       );
       if (r.htmlBody) {
-        // Use rich HTML body: preserves bold, italic, bullet lists, and images from the SMR template.
-        // If the HTML contains offer-image URLs, resolve them to base64 first so htmlToDocxElements can embed them.
-        // When richElements is empty (e.g. the section body is a flowchart table with no extractable
-        // images), we output nothing rather than falling back to the garbage plain-text version
-        // of the table cells (decision-tree labels like "да/не/?/КРАЙ").
+        // Use rich HTML body: preserves bold, italic, bullet lists, images, and tables from the SMR template.
+        // Tables are rendered 1:1 as DOCX Table objects (matching the original template structure).
         const resolvedHtml = r.htmlBody.includes("/api/admin/offer-images/")
           ? await resolveHtmlImages(r.htmlBody).catch(() => r.htmlBody!)
           : r.htmlBody;
         const richElements = htmlToDocxElements(resolvedHtml);
         paragraphs.push(...richElements);
       } else {
+        // No matching SMR template found — show only a text note, no table
         paragraphs.push(
           new Paragraph({
-            children: [new TextRun({ text: r.text, font: FONT, size: FONT_SIZE })],
-            alignment: AlignmentType.BOTH,
+            children: [
+              new TextRun({
+                text: "Не е намерена съответстваща СМР технология в шаблона.",
+                font: FONT,
+                size: FONT_SIZE,
+                italics: true,
+                color: "888888",
+              }),
+            ],
             spacing: { ...defaultSpacing, before: 0 },
           }),
-        );
-      }
-      // Resource table with empty right cells for manual completion (only for high-confidence matches)
-      if (r.confidence >= 0.7) {
-        paragraphs.push(
-          new Paragraph({ children: [], spacing: { line: LINE_SPACING, lineRule: LineRuleType.AT_LEAST, before: 100, after: 0 } }),
-        );
-        paragraphs.push(createSmrResourceTable(r.matchedTitle ?? r.kssName));
-        paragraphs.push(
-          new Paragraph({ children: [], spacing: { line: LINE_SPACING, lineRule: LineRuleType.AT_LEAST, before: 0, after: 200 } }),
         );
       }
     }
