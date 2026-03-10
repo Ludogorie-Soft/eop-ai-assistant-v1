@@ -1,50 +1,82 @@
 # Tender Technical Generator – MVP v1
 
-Production-ready MVP web application for generating Tender Technical documents. Uses AI (LangChain + OpenAI) to generate the Introduction section from CAIS links or uploaded tender documents.
+Web application for generating Tender Technical documents. Uses AI (LangChain + OpenAI) to generate introduction, team organization, and KSS/SMR sections from uploaded tender documents, then exports to DOCX.
 
 ## Stack
 
 - **Frontend:** Next.js 15 App Router, React, TypeScript, TailwindCSS
 - **Backend:** Next.js API Routes (Route Handlers)
 - **AI:** LangChain, OpenAI (server-side only)
-- **Document processing:** docx, pdf-parse, mammoth, xlsx
+- **Storage:** Supabase (tenders, templates, offers)
+- **Document processing:** docx, pdf-parse, mammoth, xlsx, Tesseract.js (OCR)
 
 ## Features
 
-- **CAIS ingestion** – Fetch and extract text from public procurement pages (cais.bg, eop.bg, app.eop.bg)
-- **Puppeteer + Supabase** (when configured) – Renders SPA pages (e.g. app.eop.bg), extracts PDF/DOC/DOCX links, downloads them, stores in Supabase Storage, extracts text
-- **Fallback** – Without Supabase: simple fetch + HTML link parsing (works for static pages)
-- **File upload** – PDF, DOC and DOCX extraction (multiple files)
+- **File upload** – PDF and DOCX extraction (multiple files, OCR fallback)
 - **AI Introduction** – LangChain + OpenAI generation with strict rephrasing rules
-- **KSS → SMR** – Upload KSS Excel + "Шаблони СМР"; LLM matches each KSS position to an SMR block and returns descriptive text (confidence ≥ 60) or "[не е намерен]"
-- **DOCX export** – Download DOCX with **1. Увод** and **2. Текстове за КСС** (if KSS SMR was generated)
+- **KSS → SMR** – Upload KSS Excel + SMR templates; LLM matches each KSS position to an SMR block with confidence scores
+- **Team Organization** – AI-generated team/staffing section based on extracted positions and templates
+- **Street View images** – Google Maps Street View integration for location imagery in exported documents
+- **Offer management** – Upload complete offer documents, extract sections, embed with vector embeddings for similarity search
+- **Admin panel** – Manage SMR templates, team position templates, and offers
+- **Tender management** – Create, list, edit, and delete tenders
+- **DOCX export** – Download DOCX with introduction, KSS texts, and team organization
 
 ## Project structure
 
 ```
 ├── app/
-│   ├── api/                    # Next.js API Route Handlers
-│   │   ├── cais/route.ts
-│   │   ├── parse-files/route.ts
+│   ├── api/
+│   │   ├── admin/
+│   │   │   ├── offer-images/[filename]/route.ts
+│   │   │   ├── offers/route.ts
+│   │   │   ├── offers/[id]/sections/route.ts
+│   │   │   ├── team-templates/route.ts
+│   │   │   ├── team-templates/download/route.ts
+│   │   │   ├── templates/route.ts
+│   │   │   └── templates/download/route.ts
+│   │   ├── generate-docx/route.ts
 │   │   ├── generate-introduction/route.ts
 │   │   ├── generate-kss-smr/route.ts
-│   │   └── generate-docx/route.ts
+│   │   ├── generate-team-organization/route.ts
+│   │   ├── parse-files/route.ts
+│   │   └── tenders/route.ts & [id]/route.ts
+│   ├── admin/templates/page.tsx
+│   ├── tender/[id]/page.tsx
 │   ├── components/
+│   │   ├── HomePage.tsx
+│   │   ├── TenderListPage.tsx
+│   │   ├── TenderSource.tsx
+│   │   ├── RawExtractedText.tsx
+│   │   ├── Introduction.tsx
+│   │   ├── KssSmrSection.tsx
+│   │   ├── TeamOrganization.tsx
+│   │   └── GenerateDocxButton.tsx
 │   ├── layout.tsx
 │   ├── page.tsx
 │   └── globals.css
-├── lib/                        # Shared server-side utilities
-│   ├── caisFetcher.ts
-│   ├── caisPuppeteer.ts
+├── lib/
 │   ├── fileParser.ts
 │   ├── langchainClient.ts
 │   ├── introductionGenerator.ts
+│   ├── verbatimSections.ts
 │   ├── kssParser.ts
 │   ├── smrTemplateParser.ts
 │   ├── smrMatcher.ts
 │   ├── kssSmrGenerator.ts
+│   ├── teamOrganizationGenerator.ts
+│   ├── teamPositionExtractor.ts
+│   ├── teamTemplateParser.ts
+│   ├── teamTemplateStorage.ts
 │   ├── docxGenerator.ts
+│   ├── htmlToDocxBody.ts
+│   ├── satelliteImage.ts
 │   ├── filenameEncoding.ts
+│   ├── offerParser.ts
+│   ├── offerEmbeddings.ts
+│   ├── offerStorage.ts
+│   ├── templateStorage.ts
+│   ├── tenderStorage.ts
 │   └── prompts/
 ├── scripts/
 ├── next.config.ts
@@ -68,24 +100,23 @@ Create a `.env.local` file in the project root (Next.js loads this automatically
 ```env
 OPENAI_API_KEY=sk-your-openai-api-key
 
-# For automatic CAIS document fetch (Puppeteer + Supabase)
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
+
+# Optional
+GOOGLE_MAPS_API_KEY=your-google-maps-api-key
 NEXT_PUBLIC_TEMPLATES_PIN=your_pin_here
 ```
 
 **Required:**
 
 - `OPENAI_API_KEY` – OpenAI API key for LangChain/LLM calls (server-side only, never exposed to client)
+- `SUPABASE_URL` + `SUPABASE_ANON_KEY` – Supabase project for tenders, templates, and offers storage
 
-**For CAIS automatic document fetch (Puppeteer + Storage):**
+**Optional:**
 
-- `SUPABASE_URL` – Supabase project URL
-- `SUPABASE_ANON_KEY` – Anon key (run `scripts/supabase-storage-policies.sql` for access)
-
-Create bucket `tender-documents` in Supabase Dashboard (Storage → New bucket) or run `scripts/setup-supabase-bucket.sql` in SQL Editor.
-
-**macOS:** If you see "macOS Prevented ... from modifying", grant **Full Disk Access** or **Automation** to Terminal/Cursor in System Settings → Privacy & Security. Or run `npm run dev` from the system Terminal (outside Cursor).
+- `GOOGLE_MAPS_API_KEY` – Google Maps Street View images in DOCX export
+- `NEXT_PUBLIC_TEMPLATES_PIN` – PIN for admin panel access
 
 ### 3. Run locally
 
@@ -95,7 +126,7 @@ Create bucket `tender-documents` in Supabase Dashboard (Storage → New bucket) 
 npm run dev
 ```
 
-Starts Next.js dev server at http://localhost:3000 (frontend + API routes under `/api`).
+Starts Next.js dev server at http://localhost:3000.
 
 **Production build:**
 
@@ -104,33 +135,18 @@ npm run build
 npm run start
 ```
 
-Serves the built app at http://localhost:3000.
-
 ## Usage flow
 
-1. **Tender source**
-   - Enter a CAIS URL and click **Fetch from CAIS**, or
-   - Upload PDF/DOC/DOCX files (multiple allowed)
+1. **Create a tender** from the home page
 
-2. **Raw extracted text**
-   - Merged text from CAIS and uploaded files appears in the readonly textarea
+2. **Upload files** – Upload PDF/DOCX tender documentation (multiple allowed)
 
-3. **Introduction**
-   - Click **Generate Introduction (AI)** to create the Introduction from the extracted text
-   - Edit the generated text if needed
+3. **Generate sections** – Use AI to generate introduction, KSS/SMR texts, and team organization
 
-4. **Export**
-   - Click **Generate DOCX** to download `tender_technical.docx`
+4. **Export** – Click **Generate DOCX** to download the final document
 
 ## Security
 
-- CAIS URL validation (only cais.bg, eop.bg, opendata.cais.bg)
 - File size limit: 100MB per file
-- Only PDF, DOC and DOCX allowed
+- Only PDF and DOCX allowed
 - OpenAI API key used only on the server
-
-## Future sections (not in MVP)
-
-- Technology
-- Team
-- Communication

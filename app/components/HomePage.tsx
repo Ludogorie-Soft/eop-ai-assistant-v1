@@ -111,7 +111,7 @@ export function HomePage({
               </h1>
             </div>
             <p className="mt-1 text-sm text-neutral-600">
-              v1 – Увод, КСС, AI генериране, DOCX експорт
+              v1 – Увод, КСС, Организация на Екип, AI генериране, DOCX експорт
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-3">

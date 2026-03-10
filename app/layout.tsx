@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Tender Technical Generator',
-  description: 'MVP v1 – Увод, файлове, AI генериране, DOCX експорт',
+  description: 'v1 – Увод, КСС, Организация на Екип, AI генериране, DOCX експорт',
 };
 
 export default function RootLayout({

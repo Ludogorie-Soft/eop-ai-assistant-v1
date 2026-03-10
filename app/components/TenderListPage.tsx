@@ -105,7 +105,7 @@ export function TenderListPage() {
               Tender Technical Generator
             </h1>
             <p className="mt-1 text-sm text-neutral-600">
-              v1 – Увод, КСС, AI генериране, DOCX експорт
+              v1 – Увод, КСС, Организация на Екип, AI генериране, DOCX експорт
             </p>
           </div>
           <Link
