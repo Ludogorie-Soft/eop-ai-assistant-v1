@@ -116,11 +116,20 @@ function captureInlineDescription(text: string, afterIdx: number): string | unde
   if (!m) return undefined;
   return m[1].trim();
 }
+/**
+ * Canonical deduplication key for standards.
+ * Strips the "БДС " prefix so that "БДС EN 933-1" and "EN 933-1" are treated as the same.
+ * The БДС-prefixed form (encountered first) wins and is kept.
+ */
+function canonicalKey(normalized: string): string {
+  return normalized.replace(/^БДС\s+/, "");
+}
+
 export function extractReferences(text: string): ExtractedReference[] {
   if (!text?.trim()) return [];
 
   const plain = stripHtml(text);
-  const seen = new Set<string>();
+  const seen = new Set<string>(); // keyed by canonicalKey
   const results: ExtractedReference[] = [];
 
   // Standards
@@ -130,8 +139,11 @@ export function extractReferences(text: string): ExtractedReference[] {
     while ((match = pattern.exec(plain)) !== null) {
       const raw = match[0].trim();
       const normalized = normalizeStandard(raw);
-      if (seen.has(normalized)) continue;
-      seen.add(normalized);
+      // Skip malformed/truncated references whose number ends with a dash
+      if (/\-$/.test(normalized)) continue;
+      const key = canonicalKey(normalized);
+      if (seen.has(key)) continue;
+      seen.add(key);
       const inlineDescription = captureInlineDescription(plain, match.index + match[0].length);
       results.push({
         raw,

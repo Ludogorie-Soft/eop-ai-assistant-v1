@@ -31,6 +31,10 @@ export type ValidationResult = {
   inlineDescription?: string;
   /** True when the inline description appears unrelated to the official title from bds-bg.org */
   titleMismatch?: boolean;
+  /** Published successor standard (60.60/90.93) found on bds-bg.org for replaced standards */
+  replacedBy?: string;
+  /** Draft/work-in-progress successor (10.99/20.00/40.60 or "pr" prefix) for replaced standards */
+  draftVersion?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -52,6 +56,60 @@ const BDS_STATUS_MAP: Record<string, ValidationStatus> = {
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+/**
+ * Check whether a position in the HTML is a "clean" match for searchTerm inside an <h4>:
+ *   1. char before is not a digit  (prevents "16933-1" matching "933-1")
+ *   2. char after  is not a digit  (prevents "12697-23" matching "12697-2", "14230" matching "1423")
+ *   3. not preceded by "digit + space/dash"  (prevents "301 933-1" matching "933-1")
+ *   4. occurs inside an <h4> tag (not in nav URLs)
+ */
+function isCleanH4Match(html: string, i: number, searchTerm: string): boolean {
+  const charBefore1 = i > 0 ? html[i - 1] : "";
+  const charBefore2 = i > 1 ? html[i - 2] : "";
+  const charAfter   = html[i + searchTerm.length] ?? "";
+
+  if (/\d/.test(charBefore1)) return false;
+  if (/\d/.test(charAfter))   return false;
+  // digit + whitespace/separator immediately before (e.g. "301 933-1")
+  if (/\d/.test(charBefore2) && /[\s\-]/.test(charBefore1)) return false;
+
+  const preceding = html.slice(Math.max(0, i - 200), i);
+  return preceding.includes("<h4") && !preceding.includes("</h4>");
+}
+
+/**
+ * Extract all (title, statusCode) pairs from the result cards in bds-bg.org HTML
+ * that contain `searchTerm` inside an <h4> tag.
+ */
+function extractResultCards(
+  html: string,
+  searchTerm: string
+): Array<{ title: string; statusCode: string }> {
+  const cards: Array<{ title: string; statusCode: string }> = [];
+  let pos = 0;
+  while (pos < html.length) {
+    const i = html.indexOf(searchTerm, pos);
+    if (i === -1) break;
+    if (!isCleanH4Match(html, i, searchTerm)) { pos = i + 1; continue; }
+    const h4Start = html.lastIndexOf("<h4", i);
+    const h4End = html.indexOf("</h4>", i);
+    if (h4Start < 0 || h4End <= h4Start) { pos = i + 1; continue; }
+    const title = html.slice(h4Start, h4End).replace(/<[^>]+>/g, "").replace(/&nbsp;/g, "").trim();
+    const afterResult = html.slice(i, i + 2000);
+    const statusMatch = afterResult.match(/<span\s+class="label[^"]*"[^>]*>(\d+\.\d+)<\/span>/);
+    if (statusMatch) {
+      cards.push({ title, statusCode: statusMatch[1] });
+    }
+    pos = h4End + 1;
+  }
+  return cards;
+}
+
+/** ISO stage codes that indicate a published / confirmed standard (a usable replacement) */
+const PUBLISHED_CODES = new Set(["60.60", "90.93"]);
+/** ISO stage codes that indicate a draft / under-vote standard */
+const DRAFT_CODES = new Set(["10.99", "20.00", "40.60"]);
 
 /**
  * Compare an inline description from the source text against the official
@@ -109,8 +167,8 @@ async function checkBdsStandard(
 
     console.log(`[checkBds] ${ref.normalized} (search: "${ref.searchTerm}") → ${html.length} bytes`);
 
-    // Find the search term inside an <h4> tag (actual result cards),
-    // not in navigation/header URLs where the keyword also appears.
+    // Find the search term inside an <h4> tag using the clean-match guard:
+    // rejects digit-before, digit-after, and digit+space-before patterns.
     const searchNum = ref.searchTerm;
     let resultIdx = -1;
     {
@@ -118,9 +176,7 @@ async function checkBdsStandard(
       while (pos < html.length) {
         const i = html.indexOf(searchNum, pos);
         if (i === -1) break;
-        // Check if this occurrence is inside an <h4> — look backwards for <h4
-        const preceding = html.slice(Math.max(0, i - 200), i);
-        if (preceding.includes("<h4") && !preceding.includes("</h4>")) {
+        if (isCleanH4Match(html, i, searchNum)) {
           resultIdx = i;
           break;
         }
@@ -164,6 +220,31 @@ async function checkBdsStandard(
         ? hasTitleMismatch(ref.inlineDescription, currentTitle)
         : undefined;
 
+    // For replaced standards, scan ALL result cards in the page to find
+    // whether a published successor or a draft version already exists.
+    let replacedBy: string | undefined;
+    let draftVersion: string | undefined;
+    if (status === "replaced") {
+      const allCards = extractResultCards(html, ref.searchTerm);
+      // Skip the card we already found (the 90.92 one); look for others
+      for (const card of allCards) {
+        if (card.title === currentTitle) continue;
+        // Skip national annexes — they're amendments of the same standard, not replacements
+        if (card.title.includes("/NA:")) continue;
+        if (PUBLISHED_CODES.has(card.statusCode)) {
+          if (!replacedBy) replacedBy = card.title;
+        } else if (DRAFT_CODES.has(card.statusCode) || card.title.startsWith("pr")) {
+          if (!draftVersion) draftVersion = card.title;
+        }
+      }
+    }
+
+    const replacedNote = replacedBy
+      ? `Замени с: ${replacedBy}`
+      : draftVersion
+        ? `Чернова в процес: ${draftVersion}`
+        : "Нова версия не е публикувана все още";
+
     return {
       ...baseResult,
       status,
@@ -171,13 +252,15 @@ async function checkBdsStandard(
       currentTitle,
       inlineDescription: ref.inlineDescription,
       titleMismatch: titleMismatch || undefined,
+      replacedBy,
+      draftVersion,
       note:
         status === "withdrawn"
           ? "Стандартът е оттеглен"
           : status === "under_review"
             ? "Стандартът е в процес на преразглеждане"
             : status === "replaced"
-              ? "Стандартът предстои да бъде заменен"
+              ? replacedNote
               : undefined,
     };
   } catch (err) {

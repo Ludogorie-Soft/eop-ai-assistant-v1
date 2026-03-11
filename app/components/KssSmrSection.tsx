@@ -24,6 +24,8 @@ export type ValidationResultMap = Record<
     source: string;
     inlineDescription?: string;
     titleMismatch?: boolean;
+    replacedBy?: string;
+    draftVersion?: string;
   }
 >;
 
@@ -83,12 +85,29 @@ function ValidationDetailsTable({ results }: { results: ValidationResultMap }) {
                 <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${STATUS_CLASSES[r.status]}`}>
                   {STATUS_LABEL[r.status]}
                 </span>
+                {r.status === "replaced" && (
+                  <span className={`ml-1.5 text-xs ${r.replacedBy ? "text-blue-700" : r.draftVersion ? "text-amber-700" : "text-orange-600"}`}>
+                    {r.replacedBy ? "✅ нова" : r.draftVersion ? "🔄 чернова" : "⏳ чака"}
+                  </span>
+                )}
               </td>
               <td className="px-2 py-1.5 text-neutral-500 whitespace-nowrap">
                 {r.statusCode ?? "—"}
               </td>
               <td className="px-2 py-1.5 text-neutral-600">
-                {r.currentTitle ?? r.note ?? "—"}
+                {r.status === "replaced" && r.replacedBy ? (
+                  <span>
+                    <span className="text-neutral-400 line-through">{r.currentTitle}</span>
+                    <span className="ml-1 font-medium text-blue-700">→ {r.replacedBy}</span>
+                  </span>
+                ) : r.status === "replaced" && r.draftVersion ? (
+                  <span className="flex flex-col gap-0.5">
+                    <span>{r.currentTitle}</span>
+                    <span className="text-amber-700 text-xs">Очаква се: {r.draftVersion}</span>
+                  </span>
+                ) : (
+                  r.currentTitle ?? r.note ?? "—"
+                )}
               </td>
               <td className="px-2 py-1.5">
                 {r.inlineDescription ? (
