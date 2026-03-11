@@ -173,6 +173,9 @@ export function KssSmrSection({
     setLoading(true);
     setError(null);
     setWarning(null);
+    setValidationSummary(null);
+    setValidationDetails(null);
+    setShowValidationDetails(false);
     try {
       const formData = new FormData();
       for (const file of kssFiles) {
@@ -209,17 +212,22 @@ export function KssSmrSection({
     if (smrResults.length === 0) return;
     setValidating(true);
     setValidationSummary(null);
+    setError(null);
     try {
       const res = await fetch("/api/validate-standards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ smrResults }),
       });
-      const data = await res.json();
+      const data = (await res.json().catch(() => ({}))) as {
+        summary?: typeof validationSummary;
+        validations?: ValidationResultMap;
+        error?: string;
+      };
       if (!res.ok) throw new Error(data.error ?? "Грешка при валидация");
-      setValidationSummary(data.summary);
-      setValidationDetails(data.validations);
-      onValidationResults?.(data.validations);
+      setValidationSummary(data.summary ?? null);
+      setValidationDetails(data.validations ?? null);
+      if (data.validations) onValidationResults?.(data.validations);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Грешка при валидация на стандарти"

@@ -16,6 +16,8 @@ const EXCEL_TYPES = [
   "application/vnd.ms-excel",
 ];
 
+const MAX_KSS_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+
 function isExcelFile(file: File): boolean {
   return EXCEL_TYPES.includes(file.type) || /\.(xlsx|xls)$/i.test(file.name);
 }
@@ -46,6 +48,12 @@ export async function POST(request: NextRequest) {
     const allKssItems: KssItem[] = [];
     let columnFallbackUsed = false;
     for (const file of kssFiles) {
+      if (file.size > MAX_KSS_FILE_SIZE_BYTES) {
+        return NextResponse.json(
+          { error: `Файлът "${file.name}" надвишава лимита от ${MAX_KSS_FILE_SIZE_BYTES / 1024 / 1024}MB.` },
+          { status: 400 },
+        );
+      }
       const buf = Buffer.from(await file.arrayBuffer());
       const { items, headersMatched } = parseKssExcel(buf);
       allKssItems.push(...items);
