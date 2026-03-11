@@ -61,11 +61,12 @@ function parseInline(html: string): TextRun[] {
 
   let bold = false;
   let italic = false;
+  let highlight: "yellow" | undefined;
 
   // Tokenize: known formatting tags | any other HTML tag (skipped) | plain text.
   // The <[^>]*> catch-all is critical: without it, unknown tags like </ul> cause the
   // engine to advance past '<' and match 'ul>' as literal text.
-  const tokenRegex = /<(\/?)(?:strong|em|b|i|br)[^>]*>|<[^>]*>|[^<]+/gi;
+  const tokenRegex = /<(\/?)(?:strong|em|b|i|br|mark)[^>]*>|<[^>]*>|[^<]+/gi;
   let match: RegExpExecArray | null;
 
   while ((match = tokenRegex.exec(clean)) !== null) {
@@ -81,6 +82,8 @@ function parseInline(html: string): TextRun[] {
         bold = !closing;
       } else if (tagName === "em" || tagName === "i") {
         italic = !closing;
+      } else if (tagName === "mark") {
+        highlight = closing ? undefined : "yellow";
       }
     } else {
       const text = decodeEntities(token);
@@ -92,6 +95,7 @@ function parseInline(html: string): TextRun[] {
             size: FONT_SIZE,
             bold,
             italics: italic,
+            ...(highlight ? { highlight } : {}),
           }),
         );
       }
@@ -312,18 +316,36 @@ function mergeImageOnlyParagraphs(html: string): string {
 }
 
 /**
- * Parse a data URI src into typed buffer, or null if unsupported/malformed.
+ * Extract src attribute value from an <img> tag using indexOf (safe for huge base64 strings).
  */
-function parseDataUri(
+function extractSrcAttribute(imgHtml: string): string | null {
+  const lower = imgHtml.toLowerCase();
+  const idx = lower.indexOf("src=");
+  if (idx === -1) return null;
+  const quoteChar = imgHtml[idx + 4];
+  if (quoteChar !== '"' && quoteChar !== "'") return null;
+  const start = idx + 5;
+  const end = imgHtml.indexOf(quoteChar, start);
+  if (end === -1) return null;
+  return imgHtml.slice(start, end);
+}
+
+/**
+ * Parse a data URI without regex (safe for huge base64 strings).
+ */
+function parseDataUriIterative(
   src: string,
 ): { type: "png" | "jpg" | "gif"; data: Buffer } | null {
-  const m = src.match(/^data:image\/(png|jpeg|jpg|gif);base64,(.+)$/i);
-  if (!m) return null;
-  const ext = m[1].toLowerCase();
+  const prefix = "data:image/";
+  if (!src.startsWith(prefix)) return null;
+  const semiIdx = src.indexOf(";base64,");
+  if (semiIdx === -1 || semiIdx > prefix.length + 10) return null;
+  const ext = src.slice(prefix.length, semiIdx).toLowerCase();
   const type: "png" | "jpg" | "gif" =
     ext === "jpeg" || ext === "jpg" ? "jpg" : ext === "gif" ? "gif" : "png";
+  const b64 = src.slice(semiIdx + 8);
   try {
-    const data = Buffer.from(m[2], "base64");
+    const data = Buffer.from(b64, "base64");
     return { type, data };
   } catch {
     return null;
@@ -335,11 +357,10 @@ function parseDataUri(
  * Returns null if src is missing or not a data URI.
  */
 function imgToParagraph(imgHtml: string): Paragraph | null {
-  const srcMatch =
-    imgHtml.match(/src="([^"]+)"/i) ?? imgHtml.match(/src='([^']+)'/i);
-  if (!srcMatch) return null;
+  const srcValue = extractSrcAttribute(imgHtml);
+  if (!srcValue) return null;
 
-  const parsed = parseDataUri(srcMatch[1]);
+  const parsed = parseDataUriIterative(srcValue);
   if (!parsed) return null;
   if (!isValidImageData(parsed.type, parsed.data)) return null;
 
@@ -408,11 +429,9 @@ function parseParagraphBlock(pHtml: string): Paragraph[] {
     if (imgMatch.index > lastIndex) {
       children.push(...parseInline(inner.slice(lastIndex, imgMatch.index)));
     }
-    const srcMatch =
-      imgMatch[0].match(/src="([^"]+)"/i) ??
-      imgMatch[0].match(/src='([^']+)'/i);
-    if (srcMatch) {
-      const parsed = parseDataUri(srcMatch[1]);
+    const srcValue = extractSrcAttribute(imgMatch[0]);
+    if (srcValue) {
+      const parsed = parseDataUriIterative(srcValue);
       if (parsed && isValidImageData(parsed.type, parsed.data)) {
         const raw = getImageDimensions(parsed.type, parsed.data);
         if (isPlaceholderImage(raw, parsed.data)) {
@@ -613,29 +632,99 @@ function parseTableBlock(tableHtml: string): (Paragraph | Table)[] {
 export function htmlToDocxElements(html: string): (Paragraph | Table)[] {
   if (!html?.trim()) return [];
 
+  // ---------------------------------------------------------------------------
+  // Guard: strip base64 data URIs BEFORE any regex processing.
+  // resolveHtmlImages() inlines images as data:image/...;base64,<huge payload>
+  // which makes the HTML string 100KB+. V8's regex engine uses internal recursion
+  // and overflows on strings this large. We extract the payloads into an array,
+  // replace them with short placeholders, run all regex on the small string,
+  // then restore them just before image rendering.
+  // All operations here are iterative (indexOf loops) — no regex on big strings.
+  // ---------------------------------------------------------------------------
+  const b64Store: string[] = [];
+  let safeHtml = "";
+  {
+    const needle = "data:image/";
+    const b64Chars = new Set(
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+    );
+    let cur = 0;
+    while (cur < html.length) {
+      const i = html.indexOf(needle, cur);
+      if (i === -1) { safeHtml += html.slice(cur); break; }
+      safeHtml += html.slice(cur, i);
+      const semi = html.indexOf(";base64,", i);
+      if (semi === -1 || semi - i > 40) {
+        // Not a real data URI — keep literal prefix and advance
+        safeHtml += needle;
+        cur = i + needle.length;
+        continue;
+      }
+      let end = semi + 8; // past ";base64,"
+      while (end < html.length && b64Chars.has(html[end])) end++;
+      b64Store.push(html.slice(i, end));
+      safeHtml += `__B64_${b64Store.length - 1}__`;
+      cur = end;
+    }
+  }
+
+  // Iterative restore — also avoids regex on strings containing huge base64
+  const restoreB64 = (s: string): string => {
+    if (b64Store.length === 0) return s;
+    let out = "";
+    let cur = 0;
+    const tag = "__B64_";
+    while (cur < s.length) {
+      const i = s.indexOf(tag, cur);
+      if (i === -1) { out += s.slice(cur); break; }
+      out += s.slice(cur, i);
+      let ne = i + tag.length;
+      while (ne < s.length && s[ne] >= "0" && s[ne] <= "9") ne++;
+      if (s.slice(ne, ne + 2) === "__") {
+        out += b64Store[parseInt(s.slice(i + tag.length, ne), 10)] ?? "";
+        cur = ne + 2;
+      } else {
+        out += tag;
+        cur = i + tag.length;
+      }
+    }
+    return out;
+  };
+
   const elements: (Paragraph | Table)[] = [];
 
-  // Step 1: Extract all <table> blocks and replace with stable placeholders.
-  // This prevents the main block regex from partially matching nested table content.
+  // Step 1: Extract <table> blocks (iterative — safe for large strings)
   const tableBlocks: string[] = [];
-  const htmlNoTables = html.replace(/<table[\s\S]*?<\/table\s*>/gi, (match) => {
-    tableBlocks.push(match);
-    return `__TABLE${tableBlocks.length - 1}__`;
-  });
+  let htmlNoTables = "";
+  {
+    let cur = 0;
+    const lower = safeHtml.toLowerCase();
+    while (cur < safeHtml.length) {
+      const openIdx = lower.indexOf("<table", cur);
+      if (openIdx === -1) { htmlNoTables += safeHtml.slice(cur); break; }
+      htmlNoTables += safeHtml.slice(cur, openIdx);
+      const closeIdx = lower.indexOf("</table", openIdx + 6);
+      if (closeIdx === -1) { htmlNoTables += safeHtml.slice(openIdx); break; }
+      const closeEnd = safeHtml.indexOf(">", closeIdx + 7);
+      const tableEnd = closeEnd === -1 ? closeIdx + 8 : closeEnd + 1;
+      tableBlocks.push(safeHtml.slice(openIdx, tableEnd));
+      htmlNoTables += `__TABLE${tableBlocks.length - 1}__`;
+      cur = tableEnd;
+    }
+  }
 
   // Step 2: Merge standalone image-only <p> elements with the next <p>.
-  // mammoth emits Word picture-bullet icons as separate <p><img/></p> paragraphs
-  // instead of keeping them inline with the list item text. This transform re-joins
-  // them so the icon renders inline with its text (matching the original template).
   const htmlMerged = mergeImageOnlyParagraphs(htmlNoTables);
 
   // Step 3: Match top-level block elements sequentially.
+  // Safe now — safeHtml has short placeholders instead of huge base64 payloads.
   const blockRegex =
     /(<p[^>]*>[\s\S]*?<\/p\s*>|<ul[^>]*>[\s\S]*?<\/ul\s*>|<ol[^>]*>[\s\S]*?<\/ol\s*>|<img[^>]*\/?>|__TABLE\d+__)/gi;
 
   let match: RegExpExecArray | null;
   while ((match = blockRegex.exec(htmlMerged)) !== null) {
-    const block = match[0];
+    // Restore base64 before content parsing (images need real data URIs)
+    const block = restoreB64(match[0]);
 
     if (/^<p/i.test(block)) {
       elements.push(...parseParagraphBlock(block));
@@ -646,7 +735,7 @@ export function htmlToDocxElements(html: string): (Paragraph | Table)[] {
       if (imgPara) elements.push(imgPara);
     } else if (/^__TABLE\d+__$/.test(block)) {
       const tIdx = parseInt(block.replace(/^__TABLE(\d+)__$/, "$1"), 10);
-      const tHtml = tableBlocks[tIdx];
+      const tHtml = restoreB64(tableBlocks[tIdx] ?? "");
       if (tHtml) {
         const tableElements = parseTableBlock(tHtml);
         if (tableElements.length > 0) {

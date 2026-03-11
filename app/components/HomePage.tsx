@@ -6,7 +6,7 @@ import { TenderSource } from "./TenderSource";
 import { RawExtractedText } from "./RawExtractedText";
 import { Introduction } from "./Introduction";
 import { TeamOrganization } from "./TeamOrganization";
-import { KssSmrSection, type SmrResult } from "./KssSmrSection";
+import { KssSmrSection, type SmrResult, type ValidationResultMap } from "./KssSmrSection";
 import { GenerateDocxButton } from "./GenerateDocxButton";
 
 interface HomePageProps {
@@ -37,6 +37,7 @@ export function HomePage({
   const [smrResults, setSmrResults] = useState<SmrResult[]>(
     initialSmrResults as SmrResult[],
   );
+  const [validationResults, setValidationResults] = useState<ValidationResultMap>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
@@ -164,6 +165,7 @@ export function HomePage({
         <KssSmrSection
           smrResults={smrResults}
           onSmrResultsUpdate={setSmrResults}
+          onValidationResults={setValidationResults}
         />
         <TeamOrganization
           rawText={rawText}

@@ -111,7 +111,6 @@ export type SmrResultForDocx = {
   htmlBody?: string;
 };
 
-
 export async function generateTenderDocx(
   introductionText: string | undefined,
   rawText?: string,
@@ -260,11 +259,24 @@ export async function generateTenderDocx(
       if (r.htmlBody) {
         // Use rich HTML body: preserves bold, italic, bullet lists, images, and tables from the SMR template.
         // Tables are rendered 1:1 as DOCX Table objects (matching the original template structure).
-        const resolvedHtml = r.htmlBody.includes("/api/admin/offer-images/")
-          ? await resolveHtmlImages(r.htmlBody).catch(() => r.htmlBody!)
-          : r.htmlBody;
-        const richElements = htmlToDocxElements(resolvedHtml);
-        paragraphs.push(...richElements);
+        try {
+          let resolvedHtml = r.htmlBody.includes("/api/admin/offer-images/")
+            ? await resolveHtmlImages(r.htmlBody).catch(() => r.htmlBody!)
+            : r.htmlBody;
+          const richElements = htmlToDocxElements(resolvedHtml);
+          paragraphs.push(...richElements);
+        } catch (htmlErr) {
+          console.warn(`[docxGenerator] HTML→DOCX failed for ${r.kssCode}, plain text fallback:`, htmlErr);
+          paragraphs.push(
+            new Paragraph({
+              children: [
+                new TextRun({ text: r.text || "[грешка при конвертиране]", font: FONT, size: FONT_SIZE }),
+              ],
+              alignment: AlignmentType.BOTH,
+              spacing: { ...defaultSpacing, before: 0 },
+            }),
+          );
+        }
       } else {
         // No matching SMR template found — show only a text note, no table
         paragraphs.push(
