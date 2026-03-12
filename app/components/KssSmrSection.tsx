@@ -26,6 +26,7 @@ export type ValidationResultMap = Record<
     titleMismatch?: boolean;
     replacedBy?: string;
     draftVersion?: string;
+    sourceUrl?: string;
   }
 >;
 
@@ -73,6 +74,7 @@ function ValidationDetailsTable({ results }: { results: ValidationResultMap }) {
             <th className="px-2 py-1.5 text-left font-medium">Код</th>
             <th className="px-2 py-1.5 text-left font-medium">Официално заглавие / Бележка</th>
             <th className="px-2 py-1.5 text-left font-medium">Описание в текста</th>
+            <th className="px-2 py-1.5 text-left font-medium">Линк</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-amber-100">
@@ -115,6 +117,20 @@ function ValidationDetailsTable({ results }: { results: ValidationResultMap }) {
                     {r.titleMismatch && <span title="Описанието може да не съответства на стандарта">⚠️ </span>}
                     {r.inlineDescription}
                   </span>
+                ) : (
+                  <span className="text-neutral-400">—</span>
+                )}
+              </td>
+              <td className="px-2 py-1.5 whitespace-nowrap">
+                {r.sourceUrl ? (
+                  <a
+                    href={r.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 underline"
+                  >
+                    Провери
+                  </a>
                 ) : (
                   <span className="text-neutral-400">—</span>
                 )}

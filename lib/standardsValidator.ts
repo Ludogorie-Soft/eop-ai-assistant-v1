@@ -35,6 +35,8 @@ export type ValidationResult = {
   replacedBy?: string;
   /** Draft/work-in-progress successor (10.99/20.00/40.60 or "pr" prefix) for replaced standards */
   draftVersion?: string;
+  /** URL to the source page for manual verification */
+  sourceUrl?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -150,6 +152,8 @@ async function checkBdsStandard(
       `https://bds-bg.org/bg/project/list?keywords=${encodeURIComponent(ref.searchTerm)}` +
       `&status%5B0%5D=IN_DEVELOPMENT&status%5B1%5D=PUBLISHED&status%5B2%5D=WITHDRAWN` +
       `&operatorCommittee=1&operatorStdType=3&listMode=DEFAULT`;
+
+    baseResult.sourceUrl = searchUrl;
 
     // Use curl instead of fetch — bds-bg.org is very slow (~15-30s) and
     // Node's fetch often times out before curl does.
@@ -271,19 +275,192 @@ async function checkBdsStandard(
   }
 }
 
+/** Bulgarian month names (lowercase) for date matching */
+const BG_MONTHS: Record<string, string> = {
+  "01": "януари", "02": "февруари", "03": "март", "04": "април",
+  "05": "май", "06": "юни", "07": "юли", "08": "август",
+  "09": "септември", "10": "октомври", "11": "ноември", "12": "декември",
+};
+
 /**
- * Check a regulation reference.
- * MVP: returns "unknown" with a note to check manually.
- * lex.bg requires JavaScript rendering — not feasible for server-side scraping.
+ * Build search keywords from a regulation reference for Ciela's free zone.
+ * Includes month name and key words from inline description for better matching.
+ * "Наредба № 3 от 31.07.2003 г." + "за съставяне на актове" → "наредба 3 юли 2003 съставяне актове"
+ * "Наредба № РД-02-20-1 от 05.02.2015 г." + "за влагане на строителни продукти" → "РД-02-20-1 февруари 2015 строителни продукти"
  */
-function checkRegulation(ref: ExtractedReference): ValidationResult {
+function regulationSearchTerms(normalized: string, inlineDescription?: string): string {
+  const idMatch = normalized.match(/№\s*([А-Яа-яA-Za-z\-]*\d[\w\-]*)/);
+  const id = idMatch ? idMatch[1] : "";
+  const dateMatch = normalized.match(/от\s+\d{1,2}\.(\d{1,2})\.(\d{4})/);
+  const year = dateMatch ? dateMatch[2] : "";
+  const month = dateMatch ? BG_MONTHS[dateMatch[1].padStart(2, "0")] ?? "" : "";
+  const prefix = /^[0-9]+$/.test(id) ? "наредба " : "";
+  // Extract 2-3 meaningful words from inline description (skip prepositions)
+  let descWords = "";
+  if (inlineDescription) {
+    const words = inlineDescription
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length >= 4 && !/^(като|това|която|които|при|или|след|преди|между)$/.test(w));
+    descWords = words.slice(0, 3).join(" ");
+  }
+  return `${prefix}${id} ${month} ${year} ${descWords}`.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Parse the regulation number and date parts from a normalized reference.
+ * "Наредба № 3 от 31.07.2003 г." → { id: "3", year: "2003", month: "07" }
+ * "Наредба № РД-02-20-1 от 05.02.2015 г." → { id: "РД-02-20-1", year: "2015", month: "02" }
+ */
+function parseRegRef(normalized: string): { id: string; year: string; month: string } {
+  const idMatch = normalized.match(/№\s*([А-Яа-яA-Za-z\-]*\d[\w\-]*)/);
+  const dateMatch = normalized.match(/от\s+\d{1,2}\.(\d{1,2})\.(\d{4})/);
   return {
+    id: idMatch ? idMatch[1] : "",
+    year: dateMatch ? dateMatch[2] : "",
+    month: dateMatch ? dateMatch[1].padStart(2, "0") : "",
+  };
+}
+
+/**
+ * Match a Ciela result title against the regulation reference.
+ * Checks that the title contains the correct regulation number and year.
+ * Title example: "НАРЕДБА № 2 ОТ 17 ЯНУАРИ 2001 Г. ЗА СИГНАЛИЗАЦИЯ..."
+ */
+function matchesRegulation(title: string, ref: { id: string; year: string; month: string }): boolean {
+  const t = title.toUpperCase();
+  // Must contain the regulation number after "№" or "НАРЕДБА"
+  const idUpper = ref.id.toUpperCase();
+  // For simple numeric IDs: match "№ 3 " or "№ 3," exactly (not "№ 30" or "№ 38")
+  if (/^[0-9]+$/.test(ref.id)) {
+    const numPattern = new RegExp(`№\\s*${idUpper}(?:\\s|,|$)`, "i");
+    if (!numPattern.test(t)) return false;
+  } else {
+    // For codes like РД-02-20-1: direct substring match
+    if (!t.includes(idUpper)) return false;
+  }
+  // Must contain the year
+  if (ref.year && !t.includes(ref.year)) return false;
+  // Should contain the month name (if available)
+  if (ref.month && BG_MONTHS[ref.month]) {
+    if (!t.includes(BG_MONTHS[ref.month].toUpperCase())) return false;
+  }
+  // Must NOT be an amendment ("ИЗМЕНЕНИЕ И ДОПЪЛНЕНИЕ НА") of another regulation
+  if (/ИЗМЕНЕНИЕ|ДОПЪЛНЕНИЕ/.test(t) && /НА\s+НАРЕДБА/.test(t)) return false;
+  return true;
+}
+
+/**
+ * Check a regulation reference against ciela.net free zone.
+ * 1. Search the наредби listing with ?string= filter
+ * 2. Find the matching regulation URL by comparing titles
+ * 3. Fetch its page and parse the publication/status line
+ */
+async function checkRegulation(ref: ExtractedReference): Promise<ValidationResult> {
+  const now = new Date().toISOString();
+  const baseResult: ValidationResult = {
     reference: ref.normalized,
     status: "unknown",
-    lastChecked: new Date().toISOString(),
-    source: "manual",
-    note: "Наредбите изискват ръчна проверка в lex.bg",
+    lastChecked: now,
+    source: "ciela.net",
   };
+
+  try {
+    const searchTerms = regulationSearchTerms(ref.normalized, ref.inlineDescription);
+    const parsed = parseRegRef(ref.normalized);
+    const searchUrl =
+      `https://www.ciela.net/svobodna-zona-normativi/category/85791/naredbi` +
+      `?string=${encodeURIComponent(searchTerms)}`;
+
+    console.log(`[checkRegulation] ${ref.normalized} → searching "${searchTerms}"`);
+
+    // Step 1: Search the listing
+    const { stdout: listHtml } = await execFileAsync("curl", [
+      "-s", "-L",
+      "--max-time", "20",
+      "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+      searchUrl,
+    ], { maxBuffer: 5 * 1024 * 1024 });
+
+    if (!listHtml || listHtml.length < 200) {
+      return { ...baseResult, note: "Празен отговор от ciela.net" };
+    }
+
+    // Extract all regulation (title, url) pairs from search results
+    const resultPattern = /href="(\/svobodna-zona-normativi\/view\/[^"]+)"[^>]*>\s*([^<]+)/g;
+    const results: Array<{ url: string; title: string }> = [];
+    let rm: RegExpExecArray | null;
+    while ((rm = resultPattern.exec(listHtml)) !== null) {
+      results.push({ url: rm[1], title: rm[2].trim() });
+    }
+
+    if (results.length === 0) {
+      console.log(`[checkRegulation] ${ref.normalized} → not found in Ciela search`);
+      return { ...baseResult, note: "Не е намерена в ciela.net" };
+    }
+
+    // Find the best matching result by checking title against regulation ID/year/month
+    const match = results.find((r) => matchesRegulation(r.title, parsed));
+    if (!match) {
+      console.log(`[checkRegulation] ${ref.normalized} → ${results.length} results but no title match`);
+      console.log(`[checkRegulation]   titles: ${results.slice(0, 3).map(r => r.title).join(" | ")}`);
+      return { ...baseResult, note: "Не е намерена точно съвпадение в ciela.net" };
+    }
+
+    const regUrl = `https://www.ciela.net${match.url}`;
+    console.log(`[checkRegulation] ${ref.normalized} → matched: "${match.title}"`);
+
+    // Step 2: Fetch the regulation page
+    const { stdout: pageHtml } = await execFileAsync("curl", [
+      "-s", "-L",
+      "--max-time", "20",
+      "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+      regUrl,
+    ], { maxBuffer: 10 * 1024 * 1024 });
+
+    if (!pageHtml || pageHtml.length < 200) {
+      return { ...baseResult, sourceUrl: regUrl, note: "Празен отговор от страницата в ciela.net" };
+    }
+
+    // Extract the title from <title> tag
+    const titleMatch = pageHtml.match(/<title>Ciela Norma - ([^<]+)<\/title>/i);
+    const currentTitle = titleMatch
+      ? titleMatch[1].replace(/ - Онлайн Наредби$/i, "").trim()
+      : undefined;
+
+    // Extract the publication/status block: starts at "Обн. ДВ." and typically
+    // spans ~500 chars with comma-separated entries (изм., доп., отм.).
+    // We grab a generous chunk and check for "отм. ДВ." which means the
+    // entire regulation has been repealed.
+    const plainText = pageHtml.replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ");
+    const obnIdx = plainText.indexOf("Обн. ДВ.");
+    const statusBlock = obnIdx >= 0
+      ? plainText.slice(obnIdx, obnIdx + 1000).replace(/\s+/g, " ").trim()
+      : undefined;
+
+    // "отм. ДВ." in the publication block means the whole regulation is repealed.
+    // Individual article repeals appear deeper in the text, not in this block.
+    const isRepealed = statusBlock ? /отм\.\s*ДВ\./i.test(statusBlock) : false;
+
+    const status: ValidationStatus = isRepealed ? "withdrawn" : "valid";
+
+    console.log(`[checkRegulation] ${ref.normalized} → ${status}${isRepealed ? " (отменена)" : " (в сила)"}`);
+
+    return {
+      ...baseResult,
+      status,
+      currentTitle,
+      sourceUrl: regUrl,
+      note: isRepealed
+        ? "Наредбата е отменена"
+        : "Наредбата е в сила",
+    };
+  } catch (err) {
+    return {
+      ...baseResult,
+      note: `Грешка: ${err instanceof Error ? err.message : "unknown"}`,
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -319,15 +496,33 @@ export async function validateReferences(
     `[standardsValidator] ${refs.length} refs total, ${toCheck.length} need checking`
   );
 
-  // Separate regulations (instant) from standards (need HTTP)
+  // Separate regulations from standards
   const regulations = toCheck.filter((r) => r.type !== "standard");
   const standards = toCheck.filter((r) => r.type === "standard");
 
-  for (const ref of regulations) {
-    results.set(ref.normalized, checkRegulation(ref));
+  // Process regulations via ciela.net (batches of 3 — two curl calls each)
+  if (regulations.length > 0) {
+    const REG_BATCH = 3;
+    for (let i = 0; i < regulations.length; i += REG_BATCH) {
+      const batch = regulations.slice(i, i + REG_BATCH);
+      const batchStart = Date.now();
+      console.log(
+        `[standardsValidator] Checking regulation ${i + 1}-${Math.min(i + REG_BATCH, regulations.length)} of ${regulations.length}...`
+      );
+      const batchResults = await Promise.all(batch.map((ref) => checkRegulation(ref)));
+      for (let j = 0; j < batch.length; j++) {
+        results.set(batch[j].normalized, batchResults[j]);
+      }
+      console.log(
+        `[standardsValidator] Regulations batch done in ${((Date.now() - batchStart) / 1000).toFixed(1)}s`
+      );
+      if (i + REG_BATCH < regulations.length) {
+        await delay(500);
+      }
+    }
   }
 
-  // Process standards in batches of 5 concurrent requests
+  // Process standards in batches of 5 concurrent requests via bds-bg.org
   const BATCH_SIZE = 5;
   for (let i = 0; i < standards.length; i += BATCH_SIZE) {
     const batch = standards.slice(i, i + BATCH_SIZE);

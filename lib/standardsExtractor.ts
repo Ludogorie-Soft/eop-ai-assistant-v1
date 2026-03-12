@@ -115,7 +115,8 @@ function captureInlineDescription(text: string, afterIdx: number): string | unde
   const trimmed = tail.replace(/^:[0-9]{4}(?:\/[A-Z0-9:]+)*/, "");
   const m = trimmed.match(/^\s*(?:за|–|-|—|:)\s+([^,.\n;(]{5,80})/);
   if (!m) return undefined;
-  return m[1].trim();
+  // Stop at references to other standards/regulations
+  return m[1].replace(/\s*(?:БДС|EN|ISO|Наредба)\b.*$/, "").trim() || undefined;
 }
 /**
  * Canonical deduplication key for standards.
@@ -165,11 +166,13 @@ export function extractReferences(text: string): ExtractedReference[] {
       const normalized = normalizeRegulation(raw);
       if (seen.has(normalized)) continue;
       seen.add(normalized);
+      const inlineDescription = captureInlineDescription(plain, match.index + match[0].length);
       results.push({
         raw,
         normalized,
         type: "regulation",
         searchTerm: raw,
+        inlineDescription,
       });
     }
   }
