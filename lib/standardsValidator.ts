@@ -1,7 +1,7 @@
 /**
  * Validate Bulgarian standards and regulations against external sources.
  * - Standards (БДС/EN/ISO): checked against bds-bg.org
- * - Regulations (Наредба/Закон): checked against known status map (MVP)
+ * - Regulations (Наредба): checked against known status map (MVP)
  * Server-side only.
  */
 

@@ -1,6 +1,7 @@
 /**
- * Extract references to Bulgarian standards (БДС, EN, ISO) and regulations (Наредба, Закон)
+ * Extract references to Bulgarian standards (БДС, EN, ISO) and regulations (Наредба)
  * from KSS/SMR text content. Server-side only.
+ * Laws (Закон за ...) are intentionally excluded — only standards and Наредби are validated.
  */
 
 export type ReferenceType = "standard" | "regulation";
@@ -55,20 +56,21 @@ function standardSearchTerm(normalized: string): string {
 
 /**
  * Normalize a regulation reference for deduplication.
- * "Наредба № 3 от 16.08.2010 г." → "Наредба 3"
- * "НАРЕДБА № 18 ОТ ..." → "Наредба 18"  (ALL-CAPS normalized)
- * "Наредба No РД-02-20-2" → "Наредба РД-02-20-2"
+ * Keeps the full identifier with number and date:
+ * "НАРЕДБА № 3 от 31.07.2003 г." → "Наредба №3 от 31.07.2003 г."
+ * "Наредба РД-02-20-1 от 01.04.2024 г" → "Наредба РД-02-20-1 от 01.04.2024 г."
+ * "Наредба № РД-02-20-1 от 05.02.2015 г." → "Наредба №РД-02-20-1 от 05.02.2015 г."
  */
 function normalizeRegulation(raw: string): string {
   let s = raw.trim();
-  // Normalize first word to title case: НАРЕДБА → Наредба, ЗАКОН → Закон
+  // Normalize first word to title case: НАРЕДБА → Наредба
   s = s.replace(/^[А-ЯA-Z][А-Яа-яA-Za-z]+/, (w) => w[0] + w.slice(1).toLowerCase());
-  // Remove "от ... г." date suffix
-  s = s.replace(/\s+от\s+\d{1,2}[\.\s]\d{1,2}[\.\s]\d{4}\s*г\.?/i, "");
-  // Normalize № / No / N to just space
-  s = s.replace(/\s*(?:№|No\.?|N)\s*/i, " ");
-  // Strip anything after the number — captures like "Наредба 18 ОТ 23 ЮЛИ" become "Наредба 18"
-  s = s.replace(/^((?:Наредба|Закон\s+за\s+\S+)\s+[\w\-]+).*$/, "$1");
+  // Normalize № / No to "№ " (with space after)
+  s = s.replace(/\s*(?:№|No\.?)\s*/i, " № ");
+  // Normalize "от" to lowercase
+  s = s.replace(/\s+[Оо][Тт]\s+/, " от ");
+  // Ensure trailing "г." is present
+  s = s.replace(/(\d{4})\s*г?\.?$/, "$1 г.");
   // Collapse whitespace
   s = s.replace(/\s+/g, " ").trim();
   return s;
@@ -94,13 +96,12 @@ const STANDARD_PATTERNS = [
   /(?<![А-Яа-яA-Za-z])ISO\s+\d[\d\-.:\/A-Za-z]*/gi,
 ];
 
-// Regulations
+// Regulations — only Наредби (laws/Закони are excluded from validation)
 const REGULATION_PATTERNS = [
-  // Наредба № 3 от 16.08.2010 г.  /  НАРЕДБА № 18 ОТ ...
-  /[Нн][Аа][Рр][Ее][Дд][Бб][Аа]\s*(?:№|No\.?|N)\s*[\w\-]+(?:\s+от\s+\d{1,2}[\.\s]\d{1,2}[\.\s]\d{4}\s*г\.?)?/g,
-  // Закон за [пътищата / устройство на територията] — stops before a word starting with uppercase
-  // No `i` flag: [а-я] must stay case-sensitive so Т in "Технически" (uppercase) stops the match
-  /Закон[а]?\s+за\s+[а-яА-Я][а-я]+(?:\s+[а-я][а-яА-Я]*){0,6}/g,
+  // With № sign + date required: Наредба №3 от 31.07.2003 г., Наредба № РД-02-20-1 от 05.02.2015 г.
+  /[Нн][Аа][Рр][Ее][Дд][Бб][Аа]\s*(?:№|No\.?)\s*[А-Яа-яA-Za-z\-]*\d[\w\-]*\s+[Оо][Тт]\s+\d{1,2}[\.\s]\d{1,2}[\.\s]\d{4}\s*г\.?/g,
+  // Without № sign + date required: Наредба РД-02-20-1 от 01.04.2024 г
+  /[Нн][Аа][Рр][Ее][Дд][Бб][Аа]\s+[А-Яа-яA-Za-z]+[\-]\d[\w\-]*\s+[Оо][Тт]\s+\d{1,2}[\.\s]\d{1,2}[\.\s]\d{4}\s*г\.?/g,
 ];
 
 /**
