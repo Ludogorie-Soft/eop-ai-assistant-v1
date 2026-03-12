@@ -12,7 +12,7 @@ export async function GET() {
     const tenders = await listTenders();
     return NextResponse.json({ tenders });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to list tenders';
+    const message = err instanceof Error ? err.message : 'Грешка при зареждане на поръчките';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     const tender = await createTender(name);
     return NextResponse.json({ tender }, { status: 201 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to create tender';
+    const message = err instanceof Error ? err.message : 'Грешка при създаване на поръчката';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

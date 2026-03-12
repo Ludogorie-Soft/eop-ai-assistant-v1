@@ -83,25 +83,25 @@ function normalizeRegulation(raw: string): string {
 // Standards: БДС EN ..., БДС ISO ..., БДС EN ISO ..., standalone EN/ISO
 const STANDARD_PATTERNS = [
   // БДС EN ISO 9001:2015/NA:2017/Поправка...
-  /БДС\s+E[NН]\s+ISO\s+\d[\d\-.:\/A-Za-z]*/gi,
+  /БДС\s+E[NН]\s+ISO\s+\d[\d\-.:\/A-Za-z]*/i,
   // БДС EN 12697-6:2020
-  /БДС\s+E[NН]\s+\d[\d\-.:\/A-Za-z]*/gi,
+  /БДС\s+E[NН]\s+\d[\d\-.:\/A-Za-z]*/i,
   // БДС ISO 9001
-  /БДС\s+ISO\s+\d[\d\-.:\/A-Za-z]*/gi,
+  /БДС\s+ISO\s+\d[\d\-.:\/A-Za-z]*/i,
   // БДС 17143-90  (national-only)
-  /БДС\s+\d[\d\-.:\/A-Za-z]*/gi,
+  /БДС\s+\d[\d\-.:\/A-Za-z]*/i,
   // Standalone EN references (e.g. "EN 13108")
-  /(?<![А-Яа-яA-Za-z])EN\s+\d[\d\-.:\/A-Za-z]*/gi,
+  /(?<![А-Яа-яA-Za-z])EN\s+\d[\d\-.:\/A-Za-z]*/i,
   // Standalone ISO references
-  /(?<![А-Яа-яA-Za-z])ISO\s+\d[\d\-.:\/A-Za-z]*/gi,
+  /(?<![А-Яа-яA-Za-z])ISO\s+\d[\d\-.:\/A-Za-z]*/i,
 ];
 
 // Regulations — only Наредби (laws/Закони are excluded from validation)
 const REGULATION_PATTERNS = [
   // With № sign + date required: Наредба №3 от 31.07.2003 г., Наредба № РД-02-20-1 от 05.02.2015 г.
-  /[Нн][Аа][Рр][Ее][Дд][Бб][Аа]\s*(?:№|No\.?)\s*[А-Яа-яA-Za-z\-]*\d[\w\-]*\s+[Оо][Тт]\s+\d{1,2}[\.\s]\d{1,2}[\.\s]\d{4}\s*г\.?/g,
+  /[Нн][Аа][Рр][Ее][Дд][Бб][Аа]\s*(?:№|No\.?)\s*[А-Яа-яA-Za-z\-]*\d[\w\-]*\s+[Оо][Тт]\s+\d{1,2}[\.\s]\d{1,2}[\.\s]\d{4}\s*г\.?/,
   // Without № sign + date required: Наредба РД-02-20-1 от 01.04.2024 г
-  /[Нн][Аа][Рр][Ее][Дд][Бб][Аа]\s+[А-Яа-яA-Za-z]+[\-]\d[\w\-]*\s+[Оо][Тт]\s+\d{1,2}[\.\s]\d{1,2}[\.\s]\d{4}\s*г\.?/g,
+  /[Нн][Аа][Рр][Ее][Дд][Бб][Аа]\s+[А-Яа-яA-Za-z]+[\-]\d[\w\-]*\s+[Оо][Тт]\s+\d{1,2}[\.\s]\d{1,2}[\.\s]\d{4}\s*г\.?/,
 ];
 
 /**
@@ -136,9 +136,7 @@ export function extractReferences(text: string): ExtractedReference[] {
 
   // Standards
   for (const pattern of STANDARD_PATTERNS) {
-    pattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(plain)) !== null) {
+    for (const match of plain.matchAll(new RegExp(pattern.source, "gi"))) {
       const raw = match[0].trim();
       const normalized = normalizeStandard(raw);
       // Skip malformed/truncated references whose number ends with a dash
@@ -146,7 +144,7 @@ export function extractReferences(text: string): ExtractedReference[] {
       const key = canonicalKey(normalized);
       if (seen.has(key)) continue;
       seen.add(key);
-      const inlineDescription = captureInlineDescription(plain, match.index + match[0].length);
+      const inlineDescription = captureInlineDescription(plain, match.index! + match[0].length);
       results.push({
         raw,
         normalized,
@@ -159,14 +157,12 @@ export function extractReferences(text: string): ExtractedReference[] {
 
   // Regulations
   for (const pattern of REGULATION_PATTERNS) {
-    pattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(plain)) !== null) {
+    for (const match of plain.matchAll(new RegExp(pattern.source, "g"))) {
       const raw = match[0].trim();
       const normalized = normalizeRegulation(raw);
       if (seen.has(normalized)) continue;
       seen.add(normalized);
-      const inlineDescription = captureInlineDescription(plain, match.index + match[0].length);
+      const inlineDescription = captureInlineDescription(plain, match.index! + match[0].length);
       results.push({
         raw,
         normalized,

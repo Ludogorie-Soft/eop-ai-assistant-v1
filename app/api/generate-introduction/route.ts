@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
     const { sourceText } = body as { sourceText?: string };
     if (!sourceText || typeof sourceText !== 'string') {
       return NextResponse.json(
-        { error: 'Source text is required' },
+        { error: 'Изходният текст е задължителен' },
         { status: 400 }
       );
     }
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ introduction: result });
   } catch (err) {
     const message =
-      err instanceof Error ? err.message : 'Failed to generate introduction';
+      err instanceof Error ? err.message : 'Грешка при генериране на увода';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -31,7 +31,7 @@ async function fetchIntroductionRagContext(sourceText: string): Promise<string> 
 
 export async function generateIntroduction(sourceText: string): Promise<string> {
   if (!sourceText?.trim()) {
-    throw new Error('Source text is required for introduction generation');
+    throw new Error('Текстът на изходния документ е задължителен');
   }
 
   const cleanedSource = cleanSourceText(sourceText);
@@ -63,7 +63,7 @@ export async function generateIntroduction(sourceText: string): Promise<string> 
 
   const content = response.content;
   if (typeof content !== 'string') {
-    throw new Error('Unexpected response format from LLM');
+    throw new Error('Лош формат на отговора от LLM');
   }
 
   let out = stripMarkdownBold(content.trim());

@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response);
   } catch (err) {
     const message =
-      err instanceof Error ? err.message : "Failed to generate KSS SMR texts";
+      err instanceof Error ? err.message : "Грешка при генериране на текстовете за КСС";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

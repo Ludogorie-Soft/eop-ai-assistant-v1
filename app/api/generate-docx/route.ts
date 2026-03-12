@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     const message =
-      err instanceof Error ? err.message : "Failed to generate DOCX";
+      err instanceof Error ? err.message : "Грешка при генериране на DOCX файла";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

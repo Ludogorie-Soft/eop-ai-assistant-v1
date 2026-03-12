@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
 
     if (!files?.length) {
       return NextResponse.json(
-        { error: 'No files uploaded' },
+        { error: 'Не са качени файлове' },
         { status: 400 }
       );
     }
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
 
       if (!isAllowedFile(file.type, file.name)) {
         return NextResponse.json(
-          { error: 'Only PDF, DOC and DOCX files are allowed' },
+          { error: 'Разрешени са само PDF, DOC и DOCX файлове' },
           { status: 400 }
         );
       }
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
 
       if (buffer.length > MAX_FILE_SIZE_BYTES) {
         return NextResponse.json(
-          { error: `File ${file.name} exceeds ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB limit` },
+          { error: `Файлът ${file.name} надвишава лимита от ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB` },
           { status: 400 }
         );
       }
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ text: mergedText, files: results });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to parse files';
+    const message = err instanceof Error ? err.message : 'Грешка при обработката на файловете';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -99,7 +99,7 @@ export async function matchKssToSmr(
   if (isNoneMatch || confidence < 75) {
     return {
       text: "[не е намерен]",
-      confidence: isNoneMatch ? 0 : confidence,
+      confidence: 0,
       matchedTitle: null,
     };
   }
