@@ -663,7 +663,7 @@ export default function AdminTemplatesPage() {
   return (
     <div className="min-h-screen bg-neutral-100 text-neutral-900">
       <header className="border-b border-neutral-200 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-4xl items-start justify-between gap-4 px-4 py-5">
+        <div className="mx-auto flex max-w-[75%] items-start justify-between gap-4 px-4 py-5">
           <div className="min-w-0 flex-1">
             <h1 className="text-xl font-semibold text-neutral-800">
               Администрация
@@ -681,7 +681,7 @@ export default function AdminTemplatesPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl space-y-6 px-4 py-8">
+      <main className="mx-auto max-w-[75%] space-y-6 px-6 lg:px-12 py-8">
         {!authorized ? (
           <section className="mx-auto max-w-md rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-neutral-800">

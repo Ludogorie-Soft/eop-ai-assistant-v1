@@ -99,7 +99,7 @@ export function TenderListPage() {
   return (
     <div className="min-h-screen bg-neutral-100 text-neutral-900">
       <header className="border-b border-neutral-200 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-6">
+        <div className="mx-auto flex max-w-[75%] items-center justify-between px-4 py-6">
           <div>
             <h1 className="text-xl font-semibold text-neutral-800">
               Tender Technical Generator
@@ -117,7 +117,7 @@ export function TenderListPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl space-y-6 px-4 py-8">
+      <main className="mx-auto max-w-[75%] space-y-6 px-6 lg:px-12 py-8">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-neutral-800">
             Обществени поръчки

@@ -1,8 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { EditorContent } from '@tiptap/react';
+import { useRichEditor } from '../hooks/useRichEditor';
+import { EditorToolbar } from './EditorToolbar';
 import type { SmrResult } from './KssSmrSection';
-import { RichTextEditor } from './RichTextEditor';
 
 interface TeamOrganizationProps {
   rawText: string;
@@ -20,11 +22,15 @@ export function TeamOrganization({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const editor = useRichEditor({
+    value: teamOrganizationText,
+    onChange: onTeamOrganizationUpdate,
+    placeholder: 'Текстът за организация на екипа ще се появи след AI генериране или може да го въведете ръчно.',
+    height: '16rem',
+  });
+
   const handleGenerate = async () => {
-    if (!rawText.trim()) {
-      setError('Първо качете файлове.');
-      return;
-    }
+    if (!rawText.trim()) { setError('Първо качете файлове.'); return; }
     setLoading(true);
     setError(null);
     try {
@@ -38,19 +44,11 @@ export function TeamOrganization({
       });
       const text = await res.text();
       let data: { teamOrganization?: string; error?: string } = {};
-      if (text) {
-        try {
-          data = JSON.parse(text) as { teamOrganization?: string; error?: string };
-        } catch {
-          data = {};
-        }
-      }
+      if (text) { try { data = JSON.parse(text); } catch { data = {}; } }
       if (!res.ok) throw new Error(data.error ?? 'Failed to generate');
       onTeamOrganizationUpdate(data.teamOrganization ?? '');
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Грешка при генериране на организация на екипа'
-      );
+      setError(err instanceof Error ? err.message : 'Грешка при генериране на организация на екипа');
     } finally {
       setLoading(false);
     }
@@ -72,13 +70,10 @@ export function TeamOrganization({
         </button>
       </div>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-      <RichTextEditor
-        value={teamOrganizationText}
-        onChange={onTeamOrganizationUpdate}
-        placeholder="Текстът за организация на екипа ще се появи след AI генериране или може да го въведете ръчно."
-        height="16rem"
-      />
+      <div className="mt-3 overflow-hidden rounded-md border border-neutral-300 focus-within:border-neutral-500 focus-within:ring-1 focus-within:ring-neutral-500">
+        {editor && <EditorToolbar editor={editor} />}
+        <EditorContent editor={editor} />
+      </div>
     </section>
   );
 }
-

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { RichTextEditor } from "./RichTextEditor";
+import { EditorContent } from "@tiptap/react";
+import { useRichEditor } from "../hooks/useRichEditor";
 
 export type SmrResult = {
   kssCode: string;
@@ -159,6 +160,14 @@ export function KssSmrSection({
   onSmrResultsUpdate,
   onValidationResults,
 }: KssSmrSectionProps) {
+  const displayText = formatResultsAsText(smrResults);
+  const kssEditor = useRichEditor({
+    value: displayText,
+    placeholder: 'Текстовете за КСС ще се появят след генериране.',
+    height: '16rem',
+    editable: false,
+  });
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -253,8 +262,6 @@ export function KssSmrSection({
       setValidating(false);
     }
   };
-
-  const displayText = formatResultsAsText(smrResults);
 
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
@@ -363,12 +370,9 @@ export function KssSmrSection({
         </p>
       )}
 
-      <RichTextEditor
-        value={displayText}
-        readOnly
-        placeholder="Текстовете за КСС ще се появят след генериране."
-        height="16rem"
-      />
+      <div className="mt-3 overflow-auto rounded-md border border-neutral-300">
+        <EditorContent editor={kssEditor} />
+      </div>
     </section>
   );
 }

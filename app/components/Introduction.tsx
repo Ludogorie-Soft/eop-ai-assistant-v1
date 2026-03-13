@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { RichTextEditor } from './RichTextEditor';
+import { EditorContent } from '@tiptap/react';
+import { useRichEditor } from '../hooks/useRichEditor';
+import { EditorToolbar } from './EditorToolbar';
 
 interface IntroductionProps {
   rawText: string;
@@ -18,11 +20,17 @@ export function Introduction({
   const [error, setError] = useState<string | null>(null);
   const [isAiGenerated, setIsAiGenerated] = useState(false);
 
+  const editor = useRichEditor({
+    value: introductionText,
+    onChange: onIntroductionUpdate,
+    onUserInput: () => setIsAiGenerated(false),
+    placeholder: 'Текстът на увода ще се появи след AI генериране или може да го въведете ръчно.',
+    height: '16rem',
+    aiHighlight: isAiGenerated,
+  });
+
   const handleGenerate = async () => {
-    if (!rawText.trim()) {
-      setError('Първо качете файлове.');
-      return;
-    }
+    if (!rawText.trim()) { setError('Първо качете файлове.'); return; }
     setLoading(true);
     setError(null);
     try {
@@ -33,20 +41,12 @@ export function Introduction({
       });
       const text = await res.text();
       let data: { introduction?: string; error?: string } = {};
-      if (text) {
-        try {
-          data = JSON.parse(text) as { introduction?: string; error?: string };
-        } catch {
-          data = {};
-        }
-      }
+      if (text) { try { data = JSON.parse(text); } catch { data = {}; } }
       if (!res.ok) throw new Error(data.error ?? 'Failed to generate');
       onIntroductionUpdate(data.introduction ?? '');
       setIsAiGenerated(true);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Грешка при генериране на увод'
-      );
+      setError(err instanceof Error ? err.message : 'Грешка при генериране на увод');
     } finally {
       setLoading(false);
     }
@@ -77,14 +77,16 @@ export function Introduction({
         </button>
       </div>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-      <RichTextEditor
-        value={introductionText}
-        onChange={onIntroductionUpdate}
-        onUserInput={() => setIsAiGenerated(false)}
-        placeholder="Текстът на увода ще се появи след AI генериране или може да го въведете ръчно."
-        height="16rem"
-        aiHighlight={isAiGenerated}
-      />
+      <div
+        className={`mt-3 overflow-hidden rounded-md border transition-all duration-300 ${
+          isAiGenerated
+            ? 'border-yellow-300 ring-2 ring-yellow-200'
+            : 'border-neutral-300 focus-within:border-neutral-500 focus-within:ring-1 focus-within:ring-neutral-500'
+        }`}
+      >
+        {editor && <EditorToolbar editor={editor} />}
+        <EditorContent editor={editor} />
+      </div>
     </section>
   );
 }

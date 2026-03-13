@@ -97,7 +97,7 @@ export function HomePage({
   return (
     <div className="min-h-screen bg-neutral-100 text-neutral-900">
       <header className="border-b border-neutral-200 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-6">
+        <div className="mx-auto flex max-w-[75%] items-center justify-between px-4 py-6">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-3">
               <Link
@@ -134,7 +134,7 @@ export function HomePage({
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl space-y-6 px-4 py-8">
+      <main className="mx-auto max-w-[75%] space-y-6 px-4 py-8">
         {saveError && (
           <p className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">
             {saveError}
