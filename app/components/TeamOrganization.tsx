@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { SmrResult } from './KssSmrSection';
+import { RichTextEditor } from './RichTextEditor';
 
 interface TeamOrganizationProps {
   rawText: string;
@@ -71,12 +72,11 @@ export function TeamOrganization({
         </button>
       </div>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-      <textarea
+      <RichTextEditor
         value={teamOrganizationText}
-        onChange={(e) => onTeamOrganizationUpdate(e.target.value)}
+        onChange={onTeamOrganizationUpdate}
         placeholder="Текстът за организация на екипа ще се появи след AI генериране или може да го въведете ръчно."
-        className="mt-3 h-64 w-full resize-y rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-800 placeholder-neutral-400 focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500"
-        style={{ textAlign: 'justify' }}
+        height="16rem"
       />
     </section>
   );

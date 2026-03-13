@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { extractReferences } from "@/lib/standardsExtractor";
+import { extractReferences, canonicalKey } from "@/lib/standardsExtractor";
 import { validateReferences, type ValidationResult } from "@/lib/standardsValidator";
 import { loadCache, saveCache } from "@/lib/standardsCache";
 
@@ -32,8 +32,9 @@ export async function POST(request: NextRequest) {
       const text = r.htmlBody || r.text || "";
       const refs = extractReferences(text);
       for (const ref of refs) {
-        if (!allRefs.has(ref.normalized)) {
-          allRefs.set(ref.normalized, ref);
+        const key = canonicalKey(ref.normalized);
+        if (!allRefs.has(key)) {
+          allRefs.set(key, ref);
         }
       }
     }

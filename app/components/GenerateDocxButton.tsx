@@ -11,6 +11,23 @@ interface GenerateDocxButtonProps {
   onAfterExport?: () => void;
 }
 
+function stripHtml(html: string): string {
+  if (!html) return '';
+  if (!html.includes('<')) return html;
+  // Preserve paragraph structure: block elements → double newlines, <br> → single newline
+  return html
+    .replace(/<\/?(p|div|h[1-6]|li|tr)[^>]*>/gi, '\n\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function GenerateDocxButton({
   introductionText,
   rawText,
@@ -21,7 +38,9 @@ export function GenerateDocxButton({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const hasIntroduction = introductionText.trim().length > 0;
+  const plainIntroduction = stripHtml(introductionText);
+  const plainTeamOrganization = stripHtml(teamOrganizationText ?? '');
+  const hasIntroduction = plainIntroduction.trim().length > 0;
   const hasSmr = smrResults.length > 0;
 
   const handleGenerate = async () => {
@@ -38,10 +57,10 @@ export function GenerateDocxButton({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          introductionText: hasIntroduction ? introductionText : undefined,
+          introductionText: hasIntroduction ? plainIntroduction : undefined,
           rawText: rawText ?? "",
           smrResults: hasSmr ? smrResults : undefined,
-          teamOrganizationText: teamOrganizationText.trim() || undefined,
+          teamOrganizationText: plainTeamOrganization.trim() || undefined,
         }),
       });
       if (!res.ok) {

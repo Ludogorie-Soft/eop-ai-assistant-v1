@@ -1,3 +1,5 @@
+import { RichTextEditor } from './RichTextEditor';
+
 interface RawExtractedTextProps {
   rawText: string;
 }
@@ -11,11 +13,12 @@ export function RawExtractedText({ rawText }: RawExtractedTextProps) {
       <p className="mt-1 text-sm text-neutral-600">
         Обединен текст от качените PDF/DOCX файлове
       </p>
-      <textarea
-        readOnly
+      <RichTextEditor
         value={rawText}
+        readOnly
         placeholder="Текстът ще се появи след качване на файлове."
-        className="mt-3 h-48 w-full resize-y rounded-md border border-neutral-300 bg-neutral-50 px-3 py-2 font-mono text-sm text-neutral-800 placeholder-neutral-400 focus:outline-none"
+        height="12rem"
+        className="font-mono"
       />
     </section>
   );

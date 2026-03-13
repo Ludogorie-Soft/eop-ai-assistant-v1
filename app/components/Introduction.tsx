@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { RichTextEditor } from './RichTextEditor';
 
 interface IntroductionProps {
   rawText: string;
@@ -15,6 +16,7 @@ export function Introduction({
 }: IntroductionProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isAiGenerated, setIsAiGenerated] = useState(false);
 
   const handleGenerate = async () => {
     if (!rawText.trim()) {
@@ -40,6 +42,7 @@ export function Introduction({
       }
       if (!res.ok) throw new Error(data.error ?? 'Failed to generate');
       onIntroductionUpdate(data.introduction ?? '');
+      setIsAiGenerated(true);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Грешка при генериране на увод'
@@ -51,10 +54,19 @@ export function Introduction({
 
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-      <h2 className="text-lg font-semibold text-neutral-800">Увод</h2>
-      <p className="mt-1 text-sm text-neutral-600">
-        Редактируем текст. Натиснете „Генерирай увод (AI)" за автоматично създаване.
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h2 className="text-lg font-semibold text-neutral-800">Увод</h2>
+          <p className="mt-1 text-sm text-neutral-600">
+            Редактируем текст. Натиснете „Генерирай увод (AI)" за автоматично създаване.
+          </p>
+        </div>
+        {isAiGenerated && (
+          <span className="shrink-0 rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-medium text-yellow-800">
+            AI генериран
+          </span>
+        )}
+      </div>
       <div className="mt-3 flex gap-2">
         <button
           onClick={handleGenerate}
@@ -65,12 +77,13 @@ export function Introduction({
         </button>
       </div>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-      <textarea
+      <RichTextEditor
         value={introductionText}
-        onChange={(e) => onIntroductionUpdate(e.target.value)}
+        onChange={onIntroductionUpdate}
+        onUserInput={() => setIsAiGenerated(false)}
         placeholder="Текстът на увода ще се появи след AI генериране или може да го въведете ръчно."
-        className="mt-3 h-64 w-full resize-y rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-800 placeholder-neutral-400 focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500"
-        style={{ textAlign: 'justify' }}
+        height="16rem"
+        aiHighlight={isAiGenerated}
       />
     </section>
   );

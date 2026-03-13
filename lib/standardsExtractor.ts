@@ -123,7 +123,7 @@ function captureInlineDescription(text: string, afterIdx: number): string | unde
  * Strips the "БДС " prefix so that "БДС EN 933-1" and "EN 933-1" are treated as the same.
  * The БДС-prefixed form (encountered first) wins and is kept.
  */
-function canonicalKey(normalized: string): string {
+export function canonicalKey(normalized: string): string {
   return normalized.replace(/^БДС\s+/, "");
 }
 
