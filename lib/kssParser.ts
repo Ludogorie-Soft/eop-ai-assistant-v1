@@ -188,8 +188,9 @@ export function parseKssExcel(buffer: Buffer): ParseKssResult {
     const quantity = safeNumber(row[q]);
 
     if (!name && !code) continue;
-    // Stop at the totals section — everything below (pricing elements, etc.) is not a work item
-    if (isSummaryRow(code)) break;
+    // Skip totals/summary rows (ДДС, Обща сума, etc.) — they appear between sections too,
+    // so we continue instead of break to handle multi-section KSS files (Улично платно + Тротоари).
+    if (isSummaryRow(code)) continue;
     if (isCategoryRow(code, name)) continue;
     if (isDataHeaderRow(name, code)) continue;
     items.push({
