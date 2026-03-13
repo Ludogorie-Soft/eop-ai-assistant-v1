@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { EditorContent } from "@tiptap/react";
-import { useRichEditor } from "../hooks/useRichEditor";
 
 export type SmrResult = {
   kssCode: string;
@@ -145,14 +143,54 @@ function ValidationDetailsTable({ results }: { results: ValidationResultMap }) {
   );
 }
 
-function formatResultsAsText(results: SmrResult[]): string {
-  if (!results.length) return "";
-  return results
-    .map(
-      (r) =>
-        `${r.kssCode} – ${r.kssName} (увереност: ${r.confidence}%)\n${r.text}`,
-    )
-    .join("\n\n---\n\n");
+function confidenceClass(confidence: number): string {
+  if (confidence >= 80) return "bg-green-100 text-green-800";
+  if (confidence >= 60) return "bg-amber-100 text-amber-800";
+  return "bg-red-100 text-red-800";
+}
+
+function SmrResultsTable({ results }: { results: SmrResult[] }) {
+  if (!results.length) {
+    return (
+      <p className="mt-3 rounded-md border border-neutral-200 bg-neutral-50 px-4 py-6 text-center text-sm text-neutral-400">
+        Резултатите ще се появят след генериране.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3 max-h-96 overflow-auto rounded-md border border-neutral-200">
+      <table className="w-full text-xs">
+        <thead className="sticky top-0 bg-neutral-100 text-neutral-700">
+          <tr>
+            <th className="px-3 py-2 text-left font-medium">Позиция от KSS (СМР)</th>
+            <th className="px-3 py-2 text-left font-medium">Намерен шаблон</th>
+            <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Увереност</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-neutral-100">
+          {results.map((r, i) => (
+            <tr key={i} className="bg-white hover:bg-neutral-50">
+              <td className="px-3 py-2 text-neutral-800">
+                {r.kssCode && (
+                  <span className="mr-1.5 font-mono text-neutral-500">{r.kssCode}</span>
+                )}
+                {r.kssName}
+              </td>
+              <td className="px-3 py-2 text-neutral-600">
+                {r.matchedTitle ?? <span className="italic text-neutral-400">не е намерен</span>}
+              </td>
+              <td className="px-3 py-2">
+                <span className={`rounded px-1.5 py-0.5 font-medium ${confidenceClass(r.confidence)}`}>
+                  {r.confidence}%
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export function KssSmrSection({
@@ -160,14 +198,6 @@ export function KssSmrSection({
   onSmrResultsUpdate,
   onValidationResults,
 }: KssSmrSectionProps) {
-  const displayText = formatResultsAsText(smrResults);
-  const kssEditor = useRichEditor({
-    value: displayText,
-    placeholder: 'Текстовете за КСС ще се появят след генериране.',
-    height: '16rem',
-    editable: false,
-  });
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -370,9 +400,7 @@ export function KssSmrSection({
         </p>
       )}
 
-      <div className="mt-3 overflow-auto rounded-md border border-neutral-300">
-        <EditorContent editor={kssEditor} />
-      </div>
+      <SmrResultsTable results={smrResults} />
     </section>
   );
 }
