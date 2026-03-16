@@ -6,6 +6,7 @@ import { TenderSource } from "./TenderSource";
 import { Introduction } from "./Introduction";
 import { TeamOrganization } from "./TeamOrganization";
 import { KssSmrSection, type SmrResult, type ValidationResultMap } from "./KssSmrSection";
+import { Communication } from "./Communication";
 import { GenerateDocxButton } from "./GenerateDocxButton";
 
 interface HomePageProps {
@@ -15,6 +16,7 @@ interface HomePageProps {
   initialIntroductionText?: string;
   initialSmrResults?: unknown[];
   initialTeamOrganizationText?: string;
+  initialCommunicationText?: string;
 }
 
 export function HomePage({
@@ -24,6 +26,7 @@ export function HomePage({
   initialIntroductionText = "",
   initialSmrResults = [],
   initialTeamOrganizationText = "",
+  initialCommunicationText = "",
 }: HomePageProps) {
   const [tenderName, setTenderName] = useState(initialName);
   const [rawText, setRawText] = useState(initialRawText);
@@ -33,6 +36,7 @@ export function HomePage({
   const [teamOrganizationText, setTeamOrganizationText] = useState(
     initialTeamOrganizationText,
   );
+  const [communicationText, setCommunicationText] = useState(initialCommunicationText);
   const [smrResults, setSmrResults] = useState<SmrResult[]>(
     initialSmrResults as SmrResult[],
   );
@@ -82,6 +86,7 @@ export function HomePage({
       name: tenderName,
       introduction_text: introductionText,
       team_organization_text: teamOrganizationText,
+      communication_text: communicationText,
       raw_text: rawText,
       smr_results: smrResults,
     });
@@ -90,6 +95,7 @@ export function HomePage({
     tenderName,
     introductionText,
     teamOrganizationText,
+    communicationText,
     rawText,
     smrResults,
   ]);
@@ -177,11 +183,18 @@ export function HomePage({
           onTeamOrganizationUpdate={setTeamOrganizationText}
           smrResults={smrResults}
         />
+        <Communication
+          rawText={rawText}
+          communicationText={communicationText}
+          onCommunicationUpdate={setCommunicationText}
+          smrResults={smrResults}
+        />
         <GenerateDocxButton
           introductionText={introductionText}
           rawText={rawText}
           smrResults={smrResults}
           teamOrganizationText={teamOrganizationText}
+          communicationText={communicationText}
           onAfterExport={handleAfterDocxExport}
         />
       </main>

@@ -170,10 +170,12 @@ export async function generateTenderDocx(
   smrResults?: SmrResultForDocx[],
   satelliteImage?: { data: Buffer; width: number; height: number },
   teamOrganizationText?: string,
+  communicationText?: string,
 ): Promise<{ buffer: Buffer; filename: string }> {
   const paragraphs: (Paragraph | Table)[] = [];
   const hasIntroduction = Boolean(introductionText?.trim());
   const hasTeamOrg = Boolean(teamOrganizationText?.trim());
+  const hasCommunication = Boolean(communicationText?.trim());
   const hasSmr = Boolean(smrResults?.length);
 
   if (hasIntroduction) {
@@ -463,6 +465,48 @@ export async function generateTenderDocx(
           );
         }
       }
+    }
+  }
+
+  if (hasCommunication && communicationText) {
+    const sectionNum =
+      1 +
+      (hasIntroduction ? 1 : 0) +
+      (hasSmr ? 1 : 0) +
+      (hasTeamOrg ? 1 : 0);
+    paragraphs.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: `${sectionNum}. КОМУНИКАЦИЯ`,
+            font: FONT,
+            size: FONT_SIZE,
+            bold: true,
+          }),
+        ],
+        heading: HeadingLevel.HEADING_1,
+        alignment: AlignmentType.LEFT,
+        spacing: {
+          ...defaultSpacing,
+          before: hasIntroduction || hasSmr || hasTeamOrg ? 400 : 0,
+          after: 400,
+        },
+      }),
+    );
+
+    try {
+      const commElements = htmlToDocxElements(communicationText);
+      paragraphs.push(...commElements);
+    } catch (err) {
+      console.warn('[docxGenerator] Communication HTML→DOCX failed, plain text fallback:', err);
+      const plain = communicationText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      paragraphs.push(
+        new Paragraph({
+          children: [new TextRun({ text: plain, font: FONT, size: FONT_SIZE })],
+          alignment: AlignmentType.BOTH,
+          spacing: defaultSpacing,
+        }),
+      );
     }
   }
 

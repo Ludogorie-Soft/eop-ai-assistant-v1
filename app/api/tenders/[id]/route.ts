@@ -1,7 +1,7 @@
 /**
  * Single tender API.
  * GET    - fetch tender by id
- * PUT    - update tender fields (name, introduction_text, team_organization_text, raw_text, smr_results)
+ * PUT    - update tender fields (name, introduction_text, team_organization_text, communication_text, raw_text, smr_results)
  * DELETE - delete tender
  */
 
@@ -54,6 +54,8 @@ export async function PUT(request: NextRequest, ctx: Ctx) {
     if (typeof body.raw_text === 'string') fields.raw_text = body.raw_text;
     if (typeof body.team_organization_text === 'string')
       fields.team_organization_text = body.team_organization_text;
+    if (typeof body.communication_text === 'string')
+      fields.communication_text = body.communication_text;
     if (Array.isArray(body.smr_results)) {
       // Strip htmlBody before persisting — it contains base64 images that can exceed
       // Supabase's JSONB limits and cause request timeouts. htmlBody is only needed

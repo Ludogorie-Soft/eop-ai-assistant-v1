@@ -9,6 +9,7 @@ interface TenderData {
   name: string;
   introduction_text: string;
   team_organization_text: string;
+  communication_text: string;
   raw_text: string;
   smr_results: unknown[];
 }
@@ -72,7 +73,8 @@ export default function TenderDetailPage() {
       initialName={tender.name}
       initialRawText={tender.raw_text}
       initialIntroductionText={tender.introduction_text}
-       initialTeamOrganizationText={tender.team_organization_text}
+      initialTeamOrganizationText={tender.team_organization_text}
+      initialCommunicationText={tender.communication_text}
       initialSmrResults={tender.smr_results}
     />
   );

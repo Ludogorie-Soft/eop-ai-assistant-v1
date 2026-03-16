@@ -8,6 +8,8 @@ interface GenerateDocxButtonProps {
   rawText?: string;
   smrResults?: SmrResult[];
   teamOrganizationText?: string;
+  /** Raw HTML from the Communication rich-text editor */
+  communicationText?: string;
   onAfterExport?: () => void;
 }
 
@@ -33,6 +35,7 @@ export function GenerateDocxButton({
   rawText,
   smrResults = [],
   teamOrganizationText = "",
+  communicationText = "",
   onAfterExport,
 }: GenerateDocxButtonProps) {
   const [loading, setLoading] = useState(false);
@@ -61,6 +64,8 @@ export function GenerateDocxButton({
           rawText: rawText ?? "",
           smrResults: hasSmr ? smrResults : undefined,
           teamOrganizationText: plainTeamOrganization.trim() || undefined,
+          // Communication is sent as raw HTML (preserves tables and lists)
+          communicationText: communicationText.trim() || undefined,
         }),
       });
       if (!res.ok) {
