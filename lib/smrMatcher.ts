@@ -133,6 +133,44 @@ export async function matchKssToSmr(
     return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
   }
 
+  // N2W containment level cross-matching: N2W3 ≠ N2W5 ≠ N2W4.
+  // Extract the barrier class from KSS name and matched title; reject if they differ.
+  const kssBarrier = kssLower.match(/n\s*(\d+)\s*w\s*(\d+)/i);
+  const matchedBarrier = matchedLower.match(/n\s*(\d+)\s*w\s*(\d+)/i);
+  if (kssBarrier && matchedBarrier && kssBarrier[0].replace(/\s/g,'') !== matchedBarrier[0].replace(/\s/g,'')) {
+    return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
+  }
+
+  // "Линейни отводнители" (channel drains) must NOT match "шахта" templates (point drains).
+  if (kssLower.includes("линейни отводнители") && matchedLower.includes("шахт")) {
+    return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
+  }
+
+  // "Ел. шахта" / "електро шахта" must NOT match "ревизионна шахта" templates.
+  if (
+    (kssLower.includes("ел. шахт") || kssLower.includes("ел.шахт") ||
+     kssLower.includes("електро шахт") || kssLower.includes("електрическ") && kssLower.includes("шахт")) &&
+    matchedLower.includes("ревизионн")
+  ) {
+    return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
+  }
+
+  // "Изкореняване" in urban context must NOT match rural road right-of-way clearance templates.
+  if (
+    kssLower.includes("изкореняване") &&
+    (matchedLower.includes("сервитут") || matchedLower.includes("разчистване на площ"))
+  ) {
+    return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
+  }
+
+  // "Втори битумен разлив" must NOT match a template for "Първи битумен разлив".
+  if (
+    kssLower.includes("втори") && kssLower.includes("битумен") && kssLower.includes("разлив") &&
+    matchedLower.includes("първи") && matchedLower.includes("битумен")
+  ) {
+    return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
+  }
+
   const template = smrTemplates.find(
     (t) =>
       t.title.trim().toLowerCase() === parsed.matchedTitle.trim().toLowerCase(),

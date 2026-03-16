@@ -32,6 +32,27 @@ ROAD BASE vs. ASPHALT SURFACE — completely different materials and work:
 - "Асфалтобетонова настилка" = asphalt concrete surface. Completely different from "пътна основа" (road foundation/base).
 - A KSS item that says "Разваляне на пътна основа" combined with "изкопаване, натоварване, транспортиране, депо" describes earthwork demolition → return NONE if no template matches this earthworks category.
 
+DRAINAGE / WATER STRUCTURES — different work types, do NOT cross-match:
+- "Линейни отводнители" = linear/channel drains (long trench-style). DIFFERENT from point drain pits.
+- "Дъждоприемна шахта" / "дъждоприемни шахти" = point rainwater catch-pit (box-shaped shaft). DIFFERENT from linear drains.
+- "Ревизионна шахта" = inspection/revision manhole for sewage/storm networks. DIFFERENT from electrical manholes.
+- "Ел. шахта" / "електро шахта" / "шахта за ел. кабели" = electrical cable manhole. DIFFERENT from ревизионна шахта or дъждоприемна шахта. Do NOT match to a ревизионна шахта template.
+- If a KSS says "линейни отводнители" do NOT match to any "шахта" template — they are different physical structures.
+
+ROAD BARRIERS / SAFETY SYSTEMS — match only to the same system class:
+- "N2W3", "N2W5", "N2W4" etc. are different safety barrier containment levels. Do NOT cross-match between containment levels (N2W3 ≠ N2W5 ≠ N2W4).
+- If a KSS says "N2W3" and the template title says "N2W5" (or vice versa), that is a WRONG match — return NONE.
+- "Начални и крайни елементи" (end/start terminal elements) are DIFFERENT from the main barrier section ("Предпазна ограда"). Do NOT match end-terminal installation to a barrier-section template.
+- "Антипаркинг стълб" (anti-parking post) and "Паркинг стопер" are minor street furniture — NOT road safety barriers. Return NONE if no exact template exists.
+
+VEGETATION / SITE CLEARANCE:
+- "Изкореняване и премахване на дървесна растителност" in an urban street context is tree removal from a sidewalk/road zone.
+- "Разчистване на площите в рамките на сервитута на пътя" is rural road right-of-way clearing (much larger area, different scale). Do NOT match urban tree removal to a rural road-clearance template.
+
+BITUMEN PRIME COAT / TACK COAT:
+- "Първи (свързващ) битумен разлив" = first/prime bitumen tack coat application.
+- "Втори (свързващ) битумен разлив" = second bitumen tack coat application. It is a SEPARATE work item from the first. Do NOT reuse the first разлив template — only match if the template explicitly mentions "втори" or is clearly for a second tack coat.
+
 OTHER DISTINCTIONS:
 - "Демонтаж на ОСП" means dismantling/removal of a road structure element (signs, barriers, lighting). It is NOT milling. Do NOT match to any фрезоване or асфалт template.
 - "Ремонт на пукнатини" is crack repair — NOT the same as "Фрезоване".

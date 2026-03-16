@@ -111,6 +111,59 @@ export type SmrResultForDocx = {
   htmlBody?: string;
 };
 
+/**
+ * Strip content from an SMR template htmlBody that does NOT belong to the SMR description —
+ * e.g. KSS price tables, schedule tables (ГРАФИК), or ЗБУТ sections that bled in from the
+ * surrounding offer document when the template was extracted.
+ *
+ * Detection strategy:
+ *  1. Find the first heading/paragraph that matches known non-SMR section markers.
+ *  2. Find the first table whose header row contains KSS price columns (ед. цена / обща стойност).
+ *  3. Truncate the html at the earliest such position.
+ */
+function stripNonSmrTrailingContent(html: string): string {
+  const lower = html.toLowerCase();
+
+  // Section-heading patterns that signal a non-SMR section boundary.
+  // Keep only very distinctive headings — "мерки за збут" (NOT bare "збут"),
+  // "график за изпълнение", and the full KSS table title.
+  // Avoid patterns like "изисквания към изпълнение" that also appear inside SMR descriptions.
+  const NON_SMR_HEADINGS =
+    /(?:мерки\s+(?:за|по)\s+збут|график\s+за\s+изпълнение|количествено\s+стойностна\s+сметка)/i;
+
+  let boundary = html.length;
+
+  // Search in paragraph/heading tags for the marker text
+  const tagRe = /<(?:h[1-6]|p|strong)\b[^>]*>([\s\S]*?)<\/(?:h[1-6]|p|strong)>/gi;
+  let tagMatch: RegExpExecArray | null;
+  while ((tagMatch = tagRe.exec(html)) !== null) {
+    const text = tagMatch[1].replace(/<[^>]+>/g, "");
+    if (NON_SMR_HEADINGS.test(text) && tagMatch.index < boundary) {
+      boundary = tagMatch.index;
+      break;
+    }
+  }
+
+  // Search for KSS price tables: tables whose first ~2000 chars contain price column headers
+  const tableRe = /<table(?:\s[^>]*)?>/gi;
+  let tableMatch: RegExpExecArray | null;
+  while ((tableMatch = tableRe.exec(html)) !== null) {
+    if (tableMatch.index >= boundary) break;
+    const preview = lower.slice(tableMatch.index, tableMatch.index + 2000);
+    if (
+      (preview.includes("ед. цена") || preview.includes("единична цена") || preview.includes("ед.цена")) &&
+      (preview.includes("обща стойност") || preview.includes("стойност лв"))
+    ) {
+      if (tableMatch.index < boundary) {
+        boundary = tableMatch.index;
+        break;
+      }
+    }
+  }
+
+  return boundary < html.length ? html.slice(0, boundary).trim() : html;
+}
+
 export async function generateTenderDocx(
   introductionText: string | undefined,
   rawText?: string,
@@ -263,6 +316,9 @@ export async function generateTenderDocx(
           let resolvedHtml = r.htmlBody.includes("/api/admin/offer-images/")
             ? await resolveHtmlImages(r.htmlBody).catch(() => r.htmlBody!)
             : r.htmlBody;
+          // Strip any content that bled in from a different project's KSS/schedule/ЗБУТ sections.
+          // These appear as heading-like paragraphs containing well-known section markers.
+          resolvedHtml = stripNonSmrTrailingContent(resolvedHtml);
           const richElements = htmlToDocxElements(resolvedHtml);
           paragraphs.push(...richElements);
         } catch (htmlErr) {

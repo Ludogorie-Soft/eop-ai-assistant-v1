@@ -429,13 +429,60 @@ function extractSmrTechnologies(
 
   if (smrStarts.length === 0) return [];
 
+  // Detect the end boundary of the SMR block so we don't bleed KSS price tables,
+  // schedule tables (ГРАФИК) or ЗБУТ section headings into the last SMR entry.
+  //
+  // IMPORTANT: boundary detection must only scan content AFTER the last SMR table start,
+  // because "Изисквания към изпълнение", "График", "ЗБУТ" etc. also appear in the
+  // introductory sections of every document — scanning from position 0 would fire far
+  // too early and cut off all SMR entries.
+  const lastSmrStart = smrStarts[smrStarts.length - 1].index;
+  const postSmrHtml = smrHtml.slice(lastSmrStart);
+
+  // Section-heading patterns that signal the start of a new non-SMR document section.
+  // We require "мерки за збут" (not bare "збут") because "збут" / "ззбут" appears
+  // hundreds of times in the body of every Bulgarian construction offer.
+  const sectionBoundaryPattern =
+    /<(?:h[1-6]|p|strong)[^>]*>[^<]*(?:мерки\s+(?:за|по)\s+збут|график\s+за\s+изпълнение|количествено\s+стойностна\s+сметка|кол[.]?\s*стойностна)[^<]*<\/(?:h[1-6]|p|strong)>/gi;
+
+  // KSS price tables: tables containing both a price column header AND a total column.
+  // Only scan tables that appear after the last SMR table.
+  const kssBoundaryPositions: number[] = [];
+  const tableScanRe = /<table(?:\s[^>]*)?>/gi;
+  let tMatch: RegExpExecArray | null;
+  while ((tMatch = tableScanRe.exec(postSmrHtml)) !== null) {
+    const absPos = lastSmrStart + tMatch.index;
+    const tEnd = findTableEnd(postSmrHtml, tMatch.index);
+    const tHtml = postSmrHtml.slice(tMatch.index, tEnd);
+    const tLower = tHtml.toLowerCase();
+    if (
+      (tLower.includes("ед. цена") || tLower.includes("единична цена") || tLower.includes("ед.цена")) &&
+      (tLower.includes("обща стойност") || tLower.includes("стойност лв"))
+    ) {
+      kssBoundaryPositions.push(absPos);
+    }
+  }
+
+  // Find the earliest boundary position (relative to full smrHtml, must be > lastSmrStart)
+  let htmlBoundary = smrHtml.length;
+  let bMatch: RegExpExecArray | null;
+  while ((bMatch = sectionBoundaryPattern.exec(postSmrHtml)) !== null) {
+    const absPos = lastSmrStart + bMatch.index;
+    if (absPos > lastSmrStart && absPos < htmlBoundary) htmlBoundary = absPos;
+  }
+  for (const kssPos of kssBoundaryPositions) {
+    if (kssPos > lastSmrStart && kssPos < htmlBoundary) htmlBoundary = kssPos;
+  }
+
   // For each SMR table start, capture EVERYTHING until the next SMR table start
-  // This includes the table itself + all following paragraphs, images, sub-tables
+  // (or the section boundary for the last entry, whichever comes first).
   const result: { name: string; html: string; plainText: string }[] = [];
 
   for (let i = 0; i < smrStarts.length; i++) {
     const start = smrStarts[i].index;
-    const end = i + 1 < smrStarts.length ? smrStarts[i + 1].index : smrHtml.length;
+    const naturalEnd = i + 1 < smrStarts.length ? smrStarts[i + 1].index : smrHtml.length;
+    const end = Math.min(naturalEnd, htmlBoundary);
+    if (end <= start) continue;
     const html = smrHtml.slice(start, end).trim();
     const plainText = htmlToPlainText(html).trim();
 
