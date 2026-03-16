@@ -3,7 +3,6 @@
 import { useState, useCallback } from "react";
 import Link from "next/link";
 import { TenderSource } from "./TenderSource";
-import { RawExtractedText } from "./RawExtractedText";
 import { Introduction } from "./Introduction";
 import { TeamOrganization } from "./TeamOrganization";
 import { KssSmrSection, type SmrResult, type ValidationResultMap } from "./KssSmrSection";
@@ -37,6 +36,7 @@ export function HomePage({
   const [smrResults, setSmrResults] = useState<SmrResult[]>(
     initialSmrResults as SmrResult[],
   );
+  const [filesProcessing, setFilesProcessing] = useState(false);
   const [validationResults, setValidationResults] = useState<ValidationResultMap>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -155,12 +155,16 @@ export function HomePage({
           />
         </section>
 
-        <TenderSource onRawTextUpdate={setRawText} rawText={rawText} />
-        <RawExtractedText rawText={rawText} />
+        <TenderSource
+          onRawTextUpdate={setRawText}
+          rawText={rawText}
+          onLoadingChange={setFilesProcessing}
+        />
         <Introduction
           rawText={rawText}
           introductionText={introductionText}
           onIntroductionUpdate={setIntroductionText}
+          isFilesProcessing={filesProcessing}
         />
         <KssSmrSection
           smrResults={smrResults}

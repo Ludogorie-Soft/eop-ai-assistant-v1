@@ -5,9 +5,10 @@ import { useState, useRef } from 'react';
 interface TenderSourceProps {
   rawText: string;
   onRawTextUpdate: (text: string) => void;
+  onLoadingChange?: (loading: boolean) => void;
 }
 
-export function TenderSource({ rawText, onRawTextUpdate }: TenderSourceProps) {
+export function TenderSource({ rawText, onRawTextUpdate, onLoadingChange }: TenderSourceProps) {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -42,6 +43,7 @@ export function TenderSource({ rawText, onRawTextUpdate }: TenderSourceProps) {
     }
 
     setUploadLoading(true);
+    onLoadingChange?.(true);
     setUploadError(null);
     try {
       const formData = new FormData();
@@ -70,6 +72,7 @@ export function TenderSource({ rawText, onRawTextUpdate }: TenderSourceProps) {
       );
     } finally {
       setUploadLoading(false);
+      onLoadingChange?.(false);
     }
     e.target.value = '';
   };
