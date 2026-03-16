@@ -11,7 +11,14 @@ export type ExtractedReference = {
   normalized: string;
   type: ReferenceType;
   searchTerm: string;
-  /** Short inline description captured from the source text, e.g. "за изпитвания на зърнометричен състав" */
+  /**
+   * Full title adjacent to the citation in the source text.
+   * Can appear BEFORE (e.g. "Заглавие — БДС EN 933-1") or
+   * AFTER (e.g. "БДС EN 933-1 — Заглавие") the citation.
+   * Used for 1:1 comparison against the official BDS title.
+   */
+  extractedTitle?: string;
+  /** @deprecated Use extractedTitle. Short inline desc captured after the citation. */
   inlineDescription?: string;
 };
 
@@ -118,6 +125,88 @@ function captureInlineDescription(text: string, afterIdx: number): string | unde
   // Stop at references to other standards/regulations
   return m[1].replace(/\s*(?:БДС|EN|ISO|Наредба)\b.*$/, "").trim() || undefined;
 }
+
+const TITLE_SEPARATORS = /\s*(?:–|—|-{1,2}|:)\s*/;
+
+/**
+ * Try to capture a full standard title that appears AFTER the citation.
+ * e.g. "БДС EN 933-1:2012 – Изпитвания за геометрични характеристики..."
+ * Title must start with an uppercase letter and be at least 15 chars.
+ *
+ * Bulgarian БДС titles follow "Topic. Subtopic. Method" — at most 3 ". "-separated
+ * segments. Body text starts after the 3rd segment, or after another citation.
+ */
+function captureTitleAfter(text: string, afterIdx: number): string | undefined {
+  // Skip optional year/amendment suffix
+  const tail = text.slice(afterIdx, afterIdx + 300);
+  const withoutYear = tail.replace(/^(?::[0-9]{4}(?:\/[A-Z0-9:]+)*)?\s*/, "");
+  const sepMatch = withoutYear.match(/^(?:–|—|-{1,2})\s*/);
+  if (!sepMatch) return undefined;
+  const rest = withoutYear.slice(sepMatch[0].length);
+  // Must start with uppercase (Bulgarian or Latin) — not a preposition/conjunction
+  if (!/^[А-ЯA-Z]/.test(rest)) return undefined;
+  // Grab up to 250 chars on the same line (newline = strong boundary)
+  const line = rest.match(/^[^\n]{15,250}/)?.[0] ?? "";
+  if (!line || line.length < 15) return undefined;
+  // Cut before another standard citation (space prefix prevents cutting mid-word)
+  let title = line.replace(/\s+(?:БДС\b|EN\s+\d|ISO\s+\d|Наредба\s).*$/, "").trim();
+  // Cut at Bulgarian clause connectives following a comma — these signal body text,
+  // not a list within a title noun phrase (e.g. "Бои, термопластични..." is fine, but
+  // "Физични характеристики , както и на..." should stop at "Физични характеристики").
+  title = title.replace(/,\s+(?:как|а\s|но\s|или\s|при\s|тъй\b|поради|освен|вкл|т\.|и\s+т\.).*$/i, "").trim();
+  // БДС titles follow "Topic. Subtopic. Method" structure.
+  // Split on ". " before uppercase; keep first 2 parts unconditionally.
+  // Include the 3rd part only if it is a short noun phrase (≤ 40 chars) —
+  // long 3rd segments are body text that leaked in (e.g. ". Синият маркировъчен слой трябва...").
+  const parts = title.split(/\.\s+(?=[А-ЯA-Z])/);
+  if (parts.length >= 3) {
+    const third = parts[2].trim();
+    title = third.length <= 40
+      ? parts.slice(0, 3).join(". ")
+      : parts.slice(0, 2).join(". ");
+  }
+  // Hard cap at 200 chars; cut at last word boundary
+  if (title.length > 200) {
+    title = title.slice(0, 200).replace(/\s+\S*$/, "");
+  }
+  title = title.replace(/[.,;]+$/, "").trim();
+  return title.split(/\s+/).length >= 2 ? title : undefined;
+}
+
+/**
+ * Try to capture a full standard title that appears BEFORE the citation.
+ * e.g. "Изпитвания за геометрични характеристики – БДС EN 933-1"
+ * Looks back up to 350 chars for a separator (" – ", " — ") followed by the citation.
+ *
+ * Splits on newlines and semicolons only (NOT periods) so that multi-part titles like
+ * "Тема. Подтема. Метод" are captured whole, not just the last fragment.
+ */
+function captureTitleBefore(text: string, beforeIdx: number): string | undefined {
+  const window = text.slice(Math.max(0, beforeIdx - 350), beforeIdx);
+  // Find the LAST separator before the citation (could be " – ", " — ", " - ")
+  const sepRe = /(?:–|—|-{1,2})\s*$/;
+  const sepMatch = window.match(sepRe);
+  if (!sepMatch || sepMatch.index === undefined) return undefined;
+  const candidate = window.slice(0, sepMatch.index).trim();
+  if (candidate.length < 15) return undefined;
+  // Split on hard boundaries only (newline, semicolon) — not periods, which appear inside titles
+  const lastBlock = candidate.split(/[\n;]/).pop()?.trim() ?? "";
+  if (!lastBlock || lastBlock.length < 15) return undefined;
+  if (!/^[А-ЯA-Z]/.test(lastBlock)) return undefined;
+  // Hard cap at 200 chars; also cut before any standard citation embedded in the block
+  let title = lastBlock.replace(/\s+(?:БДС\b|EN\s+\d|ISO\s+\d|Наредба\s).*$/, "").trim();
+  if (title.length > 200) title = title.slice(0, 200).replace(/\s+\S*$/, "").trim();
+  title = title.replace(/[.,;]+$/, "").trim();
+  return title.split(/\s+/).length >= 2 ? title : undefined;
+}
+
+/**
+ * Capture the best available title (before or after citation).
+ * Prefers AFTER since it's more reliable in Bulgarian SMR documents.
+ */
+function captureExtractedTitle(text: string, matchStart: number, matchEnd: number): string | undefined {
+  return captureTitleAfter(text, matchEnd) ?? captureTitleBefore(text, matchStart);
+}
 /**
  * Canonical deduplication key for standards.
  * Strips the "БДС " prefix so that "БДС EN 933-1" and "EN 933-1" are treated as the same.
@@ -144,12 +233,17 @@ export function extractReferences(text: string): ExtractedReference[] {
       const key = canonicalKey(normalized);
       if (seen.has(key)) continue;
       seen.add(key);
-      const inlineDescription = captureInlineDescription(plain, match.index! + match[0].length);
+      const matchEnd = match.index! + match[0].length;
+      const extractedTitle = captureExtractedTitle(plain, match.index!, matchEnd);
+      const inlineDescription = extractedTitle
+        ? undefined
+        : captureInlineDescription(plain, matchEnd);
       results.push({
         raw,
         normalized,
         type: "standard",
         searchTerm: standardSearchTerm(normalized),
+        extractedTitle,
         inlineDescription,
       });
     }

@@ -27,9 +27,11 @@ export type ValidationResult = {
   note?: string;
   lastChecked: string;
   source: string;
-  /** Inline description found in the source text, e.g. "за изпитвания на зърнометричен състав" */
+  /** Inline description found in the source text (fallback when no full title) */
   inlineDescription?: string;
-  /** True when the inline description appears unrelated to the official title from bds-bg.org */
+  /** Full title extracted from the source document (before or after the citation) */
+  extractedTitle?: string;
+  /** True when extractedTitle (or inlineDescription) does not match the official BDS title */
   titleMismatch?: boolean;
   /** Published successor standard (60.60/90.93) found on bds-bg.org for replaced standards */
   replacedBy?: string;
@@ -97,7 +99,21 @@ function extractResultCards(
     const h4Start = html.lastIndexOf("<h4", i);
     const h4End = html.indexOf("</h4>", i);
     if (h4Start < 0 || h4End <= h4Start) { pos = i + 1; continue; }
-    const title = html.slice(h4Start, h4End).replace(/<[^>]+>/g, "").replace(/&nbsp;/g, "").trim();
+    const h4Text = html.slice(h4Start, h4End).replace(/<[^>]+>/g, "").replace(/&nbsp;/g, "").trim();
+    // Prefer the descriptive title after h4 over the bare code in h4
+    let title = h4Text;
+    if (!/[а-яa-z]{3,}/.test(h4Text)) {
+      const afterH4 = html.slice(h4End + 1, h4End + 600);
+      const statusPos = afterH4.search(/<span\s+class="label[^"]*"/);
+      const searchArea = afterH4.slice(0, statusPos > 5 ? statusPos : 400);
+      const descLines = searchArea
+        .replace(/<[^>]+>/g, "\n")
+        .replace(/&nbsp;/gi, " ")
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length >= 20 && /[а-яa-z]{4,}/.test(l));
+      if (descLines[0]) title = descLines[0];
+    }
     const afterResult = html.slice(i, i + 2000);
     const statusMatch = afterResult.match(/<span\s+class="label[^"]*"[^>]*>(\d+\.\d+)<\/span>/);
     if (statusMatch) {
@@ -114,22 +130,51 @@ const PUBLISHED_CODES = new Set(["60.60", "90.93"]);
 const DRAFT_CODES = new Set(["10.99", "20.00", "40.60"]);
 
 /**
- * Compare an inline description from the source text against the official
- * title from bds-bg.org. Returns true if there is a likely mismatch (the
- * description shares very few meaningful words with the title).
- *
- * Uses simple word-overlap: tokenise both strings (Bulgarian + Latin words ≥4
- * chars, case-insensitive), count how many description words appear anywhere
- * in the title. If overlap < 1 word we flag a mismatch.
+ * Normalize a title string for comparison:
+ * lowercase, strip punctuation/separators, collapse whitespace.
  */
-function hasTitleMismatch(inlineDesc: string, officialTitle: string): boolean {
-  const tokenize = (s: string) =>
-    s.toLowerCase().match(/[а-яa-z]{4,}/gi) ?? [];
-  const descWords = tokenize(inlineDesc);
-  if (descWords.length === 0) return false;
-  const titleLower = officialTitle.toLowerCase();
-  const matches = descWords.filter((w) => titleLower.includes(w));
-  return matches.length === 0;
+function normalizeTitle(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[.,;:\-–—()\[\]\/\\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Compute Jaccard similarity between two title strings.
+ * Uses words ≥ 4 chars (skips short Bulgarian prepositions/articles).
+ * Returns 0–1 where 1 = identical word sets.
+ */
+function titleSimilarity(a: string, b: string): number {
+  const words = (s: string) =>
+    new Set(normalizeTitle(s).split(" ").filter((w) => w.length >= 4));
+  const wa = words(a);
+  const wb = words(b);
+  if (wa.size === 0 || wb.size === 0) return 0;
+  const intersection = [...wa].filter((w) => wb.has(w)).length;
+  const union = new Set([...wa, ...wb]).size;
+  return union > 0 ? intersection / union : 0;
+}
+
+/**
+ * Returns true when the document title does not match the official BDS title.
+ * For full extracted titles: requires Jaccard similarity ≥ 0.3.
+ * For short inline descriptions (≤ 5 words): requires at least 1 meaningful
+ * word shared with the official title.
+ */
+function hasTitleMismatch(docTitle: string, officialTitle: string): boolean {
+  if (!docTitle || !officialTitle) return false;
+  const wordCount = docTitle.trim().split(/\s+/).length;
+  if (wordCount <= 5) {
+    // Short inline description — use simpler check (existing behaviour)
+    const titleLower = normalizeTitle(officialTitle);
+    const descWords = normalizeTitle(docTitle).split(" ").filter((w) => w.length >= 4);
+    if (descWords.length === 0) return false;
+    return descWords.filter((w) => titleLower.includes(w)).length === 0;
+  }
+  // Full title — use Jaccard similarity
+  return titleSimilarity(docTitle, officialTitle) < 0.3;
 }
 
 /**
@@ -193,16 +238,33 @@ async function checkBdsStandard(
       return { ...baseResult, note: "Не е намерен в bds-bg.org" };
     }
 
-    // Extract the full standard title from the <h4> containing the match
+    // Extract the full standard title from the <h4> containing the match.
+    // On bds-bg.org the <h4> typically holds only the standard code ("БДС EN 1339:2005").
+    // The human-readable descriptive title is in the next element (h5, p, or similar).
     const h4Start = html.lastIndexOf("<h4", resultIdx);
     const h4End = html.indexOf("</h4>", resultIdx);
     let currentTitle: string | undefined;
     if (h4Start >= 0 && h4End > h4Start) {
-      currentTitle = html
+      const h4Text = html
         .slice(h4Start, h4End)
         .replace(/<[^>]+>/g, "")
         .replace(/&nbsp;/g, "")
         .trim();
+      currentTitle = h4Text;
+      // If h4 contains only a standard code (no lowercase Bulgarian letters),
+      // look for the descriptive title in content between </h4> and the status label.
+      if (!/[а-яa-z]{3,}/.test(h4Text)) {
+        const afterH4 = html.slice(h4End + 1, h4End + 800);
+        const statusPos = afterH4.search(/<span\s+class="label[^"]*"/);
+        const searchArea = afterH4.slice(0, statusPos > 5 ? statusPos : 600);
+        const descLines = searchArea
+          .replace(/<[^>]+>/g, "\n")
+          .replace(/&nbsp;/gi, " ")
+          .split("\n")
+          .map((l) => l.trim())
+          .filter((l) => l.length >= 20 && /[а-яa-z]{4,}/.test(l) && !/^\d+\.\d+$/.test(l));
+        if (descLines[0]) currentTitle = descLines[0];
+      }
     }
 
     // Extract status code from the <span class="label ..."> after the result
@@ -219,9 +281,11 @@ async function checkBdsStandard(
 
     const status = BDS_STATUS_MAP[statusCode] ?? "unknown";
 
+    // Prefer extractedTitle for comparison; fall back to inlineDescription
+    const docTitle = ref.extractedTitle ?? ref.inlineDescription;
     const titleMismatch =
-      ref.inlineDescription && currentTitle
-        ? hasTitleMismatch(ref.inlineDescription, currentTitle)
+      docTitle && currentTitle
+        ? hasTitleMismatch(docTitle, currentTitle)
         : undefined;
 
     // For replaced standards, scan ALL result cards in the page to find
@@ -254,6 +318,7 @@ async function checkBdsStandard(
       status,
       statusCode,
       currentTitle,
+      extractedTitle: ref.extractedTitle,
       inlineDescription: ref.inlineDescription,
       titleMismatch: titleMismatch || undefined,
       replacedBy,

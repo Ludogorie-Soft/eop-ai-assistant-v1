@@ -23,6 +23,7 @@ export type ValidationResultMap = Record<
     lastChecked: string;
     source: string;
     inlineDescription?: string;
+    extractedTitle?: string;
     titleMismatch?: boolean;
     replacedBy?: string;
     draftVersion?: string;
@@ -112,14 +113,29 @@ function ValidationDetailsTable({ results }: { results: ValidationResultMap }) {
                 )}
               </td>
               <td className="px-2 py-1.5">
-                {r.inlineDescription ? (
-                  <span className={r.titleMismatch ? "font-medium text-red-700" : "text-neutral-600"}>
-                    {r.titleMismatch && <span title="Описанието може да не съответства на стандарта">⚠️ </span>}
-                    {r.inlineDescription}
-                  </span>
-                ) : (
-                  <span className="text-neutral-400">—</span>
-                )}
+                {(() => {
+                  const docTitle = r.extractedTitle ?? r.inlineDescription;
+                  if (!docTitle) return <span className="text-neutral-400">—</span>;
+                  if (r.titleMismatch) {
+                    return (
+                      <span className="flex flex-col gap-0.5">
+                        <span className="font-medium text-red-700" title="Заглавието в документа не съответства на официалното от БДС">
+                          ⚠️ В документа: {docTitle}
+                        </span>
+                        {r.currentTitle && (
+                          <span className="text-xs text-neutral-500">
+                            Официално: {r.currentTitle}
+                          </span>
+                        )}
+                      </span>
+                    );
+                  }
+                  return (
+                    <span className={r.extractedTitle ? "text-neutral-700" : "text-neutral-500"}>
+                      {docTitle}
+                    </span>
+                  );
+                })()}
               </td>
               <td className="px-2 py-1.5 whitespace-nowrap">
                 {r.sourceUrl ? (
