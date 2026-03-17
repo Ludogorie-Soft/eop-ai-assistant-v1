@@ -171,16 +171,19 @@ export async function matchKssToSmr(
     return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
   }
 
+  const normalizeTitle = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
   const template = smrTemplates.find(
-    (t) =>
-      t.title.trim().toLowerCase() === parsed.matchedTitle.trim().toLowerCase(),
+    (t) => normalizeTitle(t.title) === normalizeTitle(parsed.matchedTitle),
   );
 
-  const body = template?.body ?? "[не е намерен]";
+  if (!template) {
+    return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
+  }
+
   return {
-    text: body,
+    text: template.body,
     confidence,
-    matchedTitle: template ? template.title : parsed.matchedTitle || null,
-    htmlBody: template?.htmlBody,
+    matchedTitle: template.title,
+    htmlBody: template.htmlBody,
   };
 }
