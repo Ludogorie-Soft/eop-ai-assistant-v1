@@ -62,13 +62,13 @@ export function TenderSource({ rawText, onRawTextUpdate, onLoadingChange }: Tend
           data = {};
         }
       }
-      if (!res.ok) throw new Error(data.error ?? 'Failed to parse files');
+      if (!res.ok) throw new Error(data.error ?? 'Грешка при обработка на файловете');
       setUploadedFiles((prev) => [...prev, ...valid]);
       const newText = data.text ?? '';
       onRawTextUpdate(rawText ? `${newText}\n\n${rawText}` : newText);
     } catch (err) {
       setUploadError(
-        err instanceof Error ? err.message : 'Failed to parse files'
+        err instanceof Error ? err.message : 'Грешка при обработка на файловете'
       );
     } finally {
       setUploadLoading(false);

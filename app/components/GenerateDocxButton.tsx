@@ -109,8 +109,8 @@ export function GenerateDocxButton({
     <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
       <h2 className="text-lg font-semibold text-neutral-800">Експорт</h2>
       <p className="mt-1 text-sm text-neutral-600">
-        Генерирайте DOCX: с увод (ако има), после текстове за КСС (ако има).
-        Можете да експортнете само увод, само КСС или и двете.
+        Генерирайте DOCX: със секциите, за които има информация.
+        Можете да експортнете само 1/2/3 или всички секции.
       </p>
       <div className="mt-3">
         <button

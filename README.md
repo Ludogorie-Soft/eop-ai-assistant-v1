@@ -16,11 +16,14 @@ Web application for generating Tender Technical documents. Uses AI (LangChain + 
 - **AI Introduction** – LangChain + OpenAI generation with strict rephrasing rules
 - **KSS → SMR** – Upload KSS Excel + SMR templates; LLM matches each KSS position to an SMR block with confidence scores
 - **Team Organization** – AI-generated team/staffing section based on extracted positions and templates
+- **Communication section** – AI-generated "Комуникация" section covering communication 
+- **Standards extraction** – Auto-extracts and validates BDS/EN standards referenced in tender documentation; caches results with TTL
+- **Rich text editor** – In-browser editing of all generated sections via `RichTextEditor` with toolbar (`EditorToolbar`)
 - **Street View images** – Google Maps Street View integration for location imagery in exported documents
 - **Offer management** – Upload complete offer documents, extract sections, embed with vector embeddings for similarity search
 - **Admin panel** – Manage SMR templates, team position templates, and offers
 - **Tender management** – Create, list, edit, and delete tenders
-- **DOCX export** – Download DOCX with introduction, KSS texts, and team organization
+- **DOCX export** – Download DOCX with introduction, KSS texts, team organization, and communication section
 
 ## Project structure
 
@@ -39,6 +42,9 @@ Web application for generating Tender Technical documents. Uses AI (LangChain + 
 │   │   ├── generate-introduction/route.ts
 │   │   ├── generate-kss-smr/route.ts
 │   │   ├── generate-team-organization/route.ts
+│   │   ├── generate-communication/route.ts  
+│   │   ├── validate-standards/route.ts      
+│   │   ├── clear-standards-cache/route.ts   
 │   │   ├── parse-files/route.ts
 │   │   └── tenders/route.ts & [id]/route.ts
 │   ├── admin/templates/page.tsx
@@ -47,10 +53,12 @@ Web application for generating Tender Technical documents. Uses AI (LangChain + 
 │   │   ├── HomePage.tsx
 │   │   ├── TenderListPage.tsx
 │   │   ├── TenderSource.tsx
-│   │   ├── RawExtractedText.tsx
 │   │   ├── Introduction.tsx
 │   │   ├── KssSmrSection.tsx
 │   │   ├── TeamOrganization.tsx
+│   │   ├── Communication.tsx           
+│   │   ├── RichTextEditor.tsx          
+│   │   ├── EditorToolbar.tsx           
 │   │   └── GenerateDocxButton.tsx
 │   ├── layout.tsx
 │   ├── page.tsx
@@ -59,6 +67,7 @@ Web application for generating Tender Technical documents. Uses AI (LangChain + 
 │   ├── fileParser.ts
 │   ├── langchainClient.ts
 │   ├── introductionGenerator.ts
+│   ├── communicationGenerator.ts       
 │   ├── verbatimSections.ts
 │   ├── kssParser.ts
 │   ├── smrTemplateParser.ts
@@ -68,6 +77,9 @@ Web application for generating Tender Technical documents. Uses AI (LangChain + 
 │   ├── teamPositionExtractor.ts
 │   ├── teamTemplateParser.ts
 │   ├── teamTemplateStorage.ts
+│   ├── standardsExtractor.ts           
+│   ├── standardsValidator.ts           
+│   ├── standardsCache.ts               
 │   ├── docxGenerator.ts
 │   ├── htmlToDocxBody.ts
 │   ├── satelliteImage.ts
@@ -78,6 +90,10 @@ Web application for generating Tender Technical documents. Uses AI (LangChain + 
 │   ├── templateStorage.ts
 │   ├── tenderStorage.ts
 │   └── prompts/
+│       ├── introductionPrompt.ts
+│       ├── communicationPrompt.ts      
+│       ├── smrMatcherPrompt.ts
+│       └── teamPrompt.ts
 ├── scripts/
 ├── next.config.ts
 ├── tailwind.config.js
@@ -141,9 +157,11 @@ npm run start
 
 2. **Upload files** – Upload PDF/DOCX tender documentation (multiple allowed)
 
-3. **Generate sections** – Use AI to generate introduction, KSS/SMR texts, and team organization
+3. **Generate sections** – Use AI to generate introduction, KSS/SMR texts, team organization, and communication section
 
-4. **Export** – Click **Generate DOCX** to download the final document
+4. **Edit** – Each section can be edited in-browser via the rich text editor before export
+
+5. **Export** – Click **Generate DOCX** to download the final document
 
 ## Security
 
