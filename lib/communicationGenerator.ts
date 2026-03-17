@@ -52,10 +52,12 @@ export async function generateCommunication(
 
   // Always include Геодезия if not already present
   const expertNames = positions.map((p) => p.name);
-  const hasGeodesy = expertNames.some((n) =>
-    /геодез/i.test(n)
-  );
-  const finalExperts = [...expertNames];
+  const hasGeodesy = expertNames.some((n) => /геодез/i.test(n));
+  // Always prepend Ръководител на проекта as first member (matching reference document structure)
+  const hasProjectManager = expertNames.some((n) => /ръководител\s+на\s+проекта/i.test(n));
+  const finalExperts: string[] = [];
+  if (!hasProjectManager) finalExperts.push('Ръководител на проекта');
+  finalExperts.push(...expertNames);
   if (!hasGeodesy) finalExperts.push('Експерт по част „Геодезия"');
 
   const authority = extractAuthority(rawText);

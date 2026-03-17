@@ -478,7 +478,7 @@ export async function generateTenderDocx(
       new Paragraph({
         children: [
           new TextRun({
-            text: `${sectionNum}. КОМУНИКАЦИЯ`,
+            text: `${sectionNum}. Ред и начин за осъществяване на комуникация, координация и съгласуване на дейностите между участниците в строителния процес (Възложител, строителен надзор, авторски надзор, изпълнител), включително`,
             font: FONT,
             size: FONT_SIZE,
             bold: true,
