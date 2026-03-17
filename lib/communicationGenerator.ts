@@ -39,6 +39,46 @@ function extractProjectSubject(rawText: string): string {
 }
 
 /**
+ * Group KSS item names by category instead of listing them individually.
+ * This produces a cleaner, more structured SMR list for the prompt.
+ */
+function groupSmrByCategory(kssNames: string[]): string {
+  const categories: Record<string, string[]> = {};
+  const categoryPatterns: [RegExp, string][] = [
+    [/земн|изкоп|насип|транспорт.*земни|натовар/i, 'Земни работи'],
+    [/асфалт|битум|фрезов|настилк|плътен|неплътен|основ.*пътн/i, 'Пътни и асфалтови работи'],
+    [/тротоар|плоч|павет|пешеход/i, 'Тротоарни работи'],
+    [/борд[юи]р/i, 'Бордюри'],
+    [/отводн|канал|шахт|дъждоприемн|решетк|тръб.*канал/i, 'Отводняване и канализация'],
+    [/сигнализ|маркировк|знак|пътен.*знак|хоризонтал.*маркир|вертикал.*сигнал/i, 'Сигнализация и маркировка'],
+    [/озелен|дърв|храст|трев|засаждан/i, 'Озеленяване'],
+    [/демонтаж|разруш|събар/i, 'Демонтажни работи'],
+    [/бетон|кофраж|арматур/i, 'Бетонови работи'],
+    [/електр|осветл|кабел|стълб.*осветл/i, 'Електрически работи и осветление'],
+  ];
+
+  for (const name of kssNames) {
+    let matched = false;
+    for (const [pattern, category] of categoryPatterns) {
+      if (pattern.test(name)) {
+        if (!categories[category]) categories[category] = [];
+        categories[category].push(name);
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      if (!categories['Други СМР']) categories['Други СМР'] = [];
+      categories['Други СМР'].push(name);
+    }
+  }
+
+  return Object.entries(categories)
+    .map(([cat, items], i) => `${i + 1}. ${cat} (${items.slice(0, 5).join(', ')}${items.length > 5 ? ' и др.' : ''})`)
+    .join('\n');
+}
+
+/**
  * Generate the full Communication section as HTML.
  *
  * @param rawText - Full text from uploaded tender documentation
@@ -68,7 +108,7 @@ export async function generateCommunication(
     : '1. Технически ръководител\n2. Специалист по контрол на качеството\n3. Експерт по безопасност и здраве\n4. Експерт по част „Геодезия"';
 
   const smrList = kssNames.length
-    ? kssNames.slice(0, 30).map((n, i) => `${i + 1}. ${n}`).join('\n')
+    ? groupSmrByCategory(kssNames)
     : '(няма данни от КСС)';
 
   const llm = createLLM({ temperature: 0.2, maxTokens: 16384 });
