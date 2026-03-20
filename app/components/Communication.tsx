@@ -71,11 +71,12 @@ export function Communication({
   };
 
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
+    <section className="border-b border-neutral-100 py-10">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h2 className="text-lg font-semibold text-neutral-800">Комуникация</h2>
+          <h2 className="text-xl font-semibold text-neutral-900">Комуникация</h2>
           <p className="mt-1 text-sm text-neutral-600">
+            Редактируем текст.
             Ред и начин за осъществяване на комуникация между участниците в
             строителния процес. Генерира се автоматично от документацията и КСС.
           </p>

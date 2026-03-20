@@ -106,8 +106,8 @@ export function GenerateDocxButton({
   };
 
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-      <h2 className="text-lg font-semibold text-neutral-800">Експорт</h2>
+    <section className="py-10">
+      <h2 className="text-xl font-semibold text-neutral-900">Експорт</h2>
       <p className="mt-1 text-sm text-neutral-600">
         Генерирайте DOCX: със секциите, за които има информация.
         Можете да експортнете само 1/2/3 или всички секции.

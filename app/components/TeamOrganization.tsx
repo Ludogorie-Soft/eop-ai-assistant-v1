@@ -58,9 +58,9 @@ export function TeamOrganization({
   };
 
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
+    <section className="border-b border-neutral-100 py-10">
       <div className="flex items-center gap-2">
-        <h2 className="text-lg font-semibold text-neutral-800">Организация на екипа</h2>
+        <h2 className="text-xl font-semibold text-neutral-900">Организация на екипа</h2>
         {isAiGenerated && (
           <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
             AI генериран
