@@ -167,18 +167,8 @@ export function TenderListPage() {
                     <span className="text-sm font-medium text-neutral-800 group-hover:text-neutral-600">
                       {t.name || "Без име"}
                     </span>
-                    <div className="mt-0.5 flex items-center gap-3 text-xs text-neutral-500">
+                    <div className="mt-0.5 text-xs text-neutral-500">
                       <span>{formatDate(t.updatedAt)}</span>
-                      {t.hasIntroduction && (
-                        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-blue-700">
-                          Увод
-                        </span>
-                      )}
-                      {t.smrCount > 0 && (
-                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">
-                          {t.smrCount} КСС
-                        </span>
-                      )}
                     </div>
                   </Link>
                   <button
