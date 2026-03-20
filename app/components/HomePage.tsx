@@ -189,13 +189,16 @@ export function HomePage({
         <div className="mx-auto max-w-3xl px-12 pb-32">
           {/* Document title */}
           <div className="border-b border-neutral-100 py-10">
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-400">
+              Име на поръчката
+            </label>
             <input
               type="text"
               value={tenderName}
               onChange={(e) => setTenderName(e.target.value)}
               onBlur={handleNameBlur}
-              placeholder="Без заглавие"
-              className="w-full bg-transparent text-3xl font-bold text-neutral-900 placeholder-neutral-300 focus:outline-none"
+              placeholder="Въведете заглавие..."
+              className="w-full rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-2xl font-bold text-neutral-900 placeholder-neutral-300 transition-colors hover:border-neutral-300 focus:border-neutral-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-200"
             />
             <p className="mt-2 text-sm text-neutral-400">
               Tender Technical Generator · v1
