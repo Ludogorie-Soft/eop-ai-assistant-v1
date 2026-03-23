@@ -24,6 +24,7 @@ WORKDIR /app
 # Install Chromium + system deps required by Puppeteer and Tesseract.js
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
+    curl \
     fonts-liberation \
     libasound2 \
     libatk-bridge2.0-0 \
