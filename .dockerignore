@@ -1,0 +1,39 @@
+# Source control
+.git
+.gitignore
+
+# Dependencies (reinstalled inside container)
+node_modules
+
+# Next.js build output
+.next
+out
+
+# Environment files (never bake secrets into the image)
+.env
+.env.local
+.env.*.local
+
+# Dev / editor artifacts
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs & debug
+*.log
+npm-debug.log*
+trace
+
+# Supabase local
+supabase
+
+# Generated files
+*.xlsx
+*.docx
+
+# Docker files themselves (no need to copy into the image)
+Dockerfile
+.dockerignore

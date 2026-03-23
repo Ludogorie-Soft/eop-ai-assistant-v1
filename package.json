@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^0.1.67",
     "@langchain/core": "^0.3.0",
     "@langchain/openai": "^0.3.0",
     "@supabase/supabase-js": "^2.45.0",
