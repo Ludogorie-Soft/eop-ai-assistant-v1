@@ -5,11 +5,26 @@
  * Server-side only.
  */
 
-import { execFile } from "child_process";
-import { promisify } from "util";
 import type { ExtractedReference } from "./standardsExtractor";
 
-const execFileAsync = promisify(execFile);
+/** Fetch a URL with a timeout via AbortController. Returns the response body as text. */
+async function fetchWithTimeout(url: string, timeoutMs: number): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+      },
+      redirect: "follow",
+    });
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export type ValidationStatus =
   | "valid"
@@ -200,14 +215,7 @@ async function checkBdsStandard(
 
     baseResult.sourceUrl = searchUrl;
 
-    // Use curl instead of fetch — bds-bg.org is very slow (~15-30s) and
-    // Node's fetch often times out before curl does.
-    const { stdout: html } = await execFileAsync("curl", [
-      "-s", "-L",
-      "--max-time", "45",
-      "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-      searchUrl,
-    ]);
+    const html = await fetchWithTimeout(searchUrl, 45_000);
 
     if (!html || html.length < 100) {
       console.log(`[checkBds] ${ref.normalized} → empty response`);
@@ -440,12 +448,7 @@ async function checkRegulation(ref: ExtractedReference): Promise<ValidationResul
     console.log(`[checkRegulation] ${ref.normalized} → searching "${searchTerms}"`);
 
     // Step 1: Search the listing
-    const { stdout: listHtml } = await execFileAsync("curl", [
-      "-s", "-L",
-      "--max-time", "20",
-      "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-      searchUrl,
-    ], { maxBuffer: 5 * 1024 * 1024 });
+    const listHtml = await fetchWithTimeout(searchUrl, 20_000);
 
     if (!listHtml || listHtml.length < 200) {
       return { ...baseResult, note: "Празен отговор от ciela.net" };
@@ -476,12 +479,7 @@ async function checkRegulation(ref: ExtractedReference): Promise<ValidationResul
     console.log(`[checkRegulation] ${ref.normalized} → matched: "${match.title}"`);
 
     // Step 2: Fetch the regulation page
-    const { stdout: pageHtml } = await execFileAsync("curl", [
-      "-s", "-L",
-      "--max-time", "20",
-      "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-      regUrl,
-    ], { maxBuffer: 10 * 1024 * 1024 });
+    const pageHtml = await fetchWithTimeout(regUrl, 20_000);
 
     if (!pageHtml || pageHtml.length < 200) {
       return { ...baseResult, sourceUrl: regUrl, note: "Празен отговор от страницата в ciela.net" };
