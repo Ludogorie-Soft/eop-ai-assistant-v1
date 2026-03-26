@@ -186,7 +186,7 @@ export function HomePage({
 
       {/* Document canvas */}
       <main ref={mainRef} className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-12 pb-32">
+        <div className="mx-auto max-w-7xl px-12 pb-32">
           {/* Document title */}
           <div className="border-b border-neutral-100 py-10">
             <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-400">
