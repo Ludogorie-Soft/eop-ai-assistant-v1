@@ -17,6 +17,7 @@ import {
   TableCell,
   WidthType,
   BorderStyle,
+  ImportedXmlComponent,
 } from "docx";
 
 const FONT = "Times New Roman";
@@ -629,7 +630,9 @@ function parseTableBlock(tableHtml: string): (Paragraph | Table)[] {
  *
  * Returns an empty array for empty/null input.
  */
-export function htmlToDocxElements(html: string): (Paragraph | Table)[] {
+export function htmlToDocxElements(
+  html: string
+): (Paragraph | Table | ImportedXmlComponent)[] {
   if (!html?.trim()) return [];
 
   // ---------------------------------------------------------------------------
@@ -691,23 +694,47 @@ export function htmlToDocxElements(html: string): (Paragraph | Table)[] {
     return out;
   };
 
-  const elements: (Paragraph | Table)[] = [];
+  const elements: (Paragraph | Table | ImportedXmlComponent)[] = [];
+
+  // Step 0: Extract <div data-docx-drawing="…"> blocks before other processing.
+  // These carry self-contained DrawingML XML (wpg drawing groups) encoded as
+  // base64 in the attribute.  We lift them out to avoid confusing the table /
+  // paragraph parsers, then inject them as ImportedXmlComponent paragraphs.
+  const drawingStore: string[] = []; // index → raw XML block
+  let htmlNoDrawings = "";
+  {
+    const DRAW_OPEN = '<div data-docx-drawing="';
+    const DRAW_CLOSE = '"></div>';
+    let cur = 0;
+    while (cur < safeHtml.length) {
+      const openIdx = safeHtml.indexOf(DRAW_OPEN, cur);
+      if (openIdx === -1) { htmlNoDrawings += safeHtml.slice(cur); break; }
+      htmlNoDrawings += safeHtml.slice(cur, openIdx);
+      const b64Start = openIdx + DRAW_OPEN.length;
+      const b64End = safeHtml.indexOf(DRAW_CLOSE, b64Start);
+      if (b64End === -1) { htmlNoDrawings += safeHtml.slice(openIdx); break; }
+      const b64 = safeHtml.slice(b64Start, b64End);
+      drawingStore.push(b64);
+      htmlNoDrawings += `__DRAWING${drawingStore.length - 1}__`;
+      cur = b64End + DRAW_CLOSE.length;
+    }
+  }
 
   // Step 1: Extract <table> blocks (iterative — safe for large strings)
   const tableBlocks: string[] = [];
   let htmlNoTables = "";
   {
     let cur = 0;
-    const lower = safeHtml.toLowerCase();
-    while (cur < safeHtml.length) {
+    const lower = htmlNoDrawings.toLowerCase();
+    while (cur < htmlNoDrawings.length) {
       const openIdx = lower.indexOf("<table", cur);
-      if (openIdx === -1) { htmlNoTables += safeHtml.slice(cur); break; }
-      htmlNoTables += safeHtml.slice(cur, openIdx);
+      if (openIdx === -1) { htmlNoTables += htmlNoDrawings.slice(cur); break; }
+      htmlNoTables += htmlNoDrawings.slice(cur, openIdx);
       const closeIdx = lower.indexOf("</table", openIdx + 6);
-      if (closeIdx === -1) { htmlNoTables += safeHtml.slice(openIdx); break; }
-      const closeEnd = safeHtml.indexOf(">", closeIdx + 7);
+      if (closeIdx === -1) { htmlNoTables += htmlNoDrawings.slice(openIdx); break; }
+      const closeEnd = htmlNoDrawings.indexOf(">", closeIdx + 7);
       const tableEnd = closeEnd === -1 ? closeIdx + 8 : closeEnd + 1;
-      tableBlocks.push(safeHtml.slice(openIdx, tableEnd));
+      tableBlocks.push(htmlNoDrawings.slice(openIdx, tableEnd));
       htmlNoTables += `__TABLE${tableBlocks.length - 1}__`;
       cur = tableEnd;
     }
@@ -719,7 +746,7 @@ export function htmlToDocxElements(html: string): (Paragraph | Table)[] {
   // Step 3: Match top-level block elements sequentially.
   // Safe now — safeHtml has short placeholders instead of huge base64 payloads.
   const blockRegex =
-    /(<p[^>]*>[\s\S]*?<\/p\s*>|<ul[^>]*>[\s\S]*?<\/ul\s*>|<ol[^>]*>[\s\S]*?<\/ol\s*>|<img[^>]*\/?>|__TABLE\d+__)/gi;
+    /(<p[^>]*>[\s\S]*?<\/p\s*>|<ul[^>]*>[\s\S]*?<\/ul\s*>|<ol[^>]*>[\s\S]*?<\/ol\s*>|<img[^>]*\/?>|__TABLE\d+__|__DRAWING\d+__)/gi;
 
   let match: RegExpExecArray | null;
   while ((match = blockRegex.exec(htmlMerged)) !== null) {
@@ -733,6 +760,32 @@ export function htmlToDocxElements(html: string): (Paragraph | Table)[] {
     } else if (/^<img/i.test(block)) {
       const imgPara = imgToParagraph(block);
       if (imgPara) elements.push(imgPara);
+    } else if (/^__DRAWING\d+__$/.test(block)) {
+      const dIdx = parseInt(block.replace(/^__DRAWING(\d+)__$/, "$1"), 10);
+      const b64 = drawingStore[dIdx];
+      if (b64) {
+        try {
+          const drawingXml = Buffer.from(b64, "base64").toString("utf-8");
+          // Wrap the mc:AlternateContent block in a <w:p> with all necessary
+          // namespace declarations so it is valid as a standalone XML fragment.
+          const wrappedXml =
+            `<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"` +
+            ` xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"` +
+            ` xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"` +
+            ` xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"` +
+            ` xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"` +
+            ` xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"` +
+            ` xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"` +
+            ` xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"` +
+            ` xmlns:v="urn:schemas-microsoft-com:vml"` +
+            ` xmlns:o="urn:schemas-microsoft-com:office:office">` +
+            drawingXml +
+            `</w:p>`;
+          elements.push(ImportedXmlComponent.fromXmlString(wrappedXml) as unknown as ImportedXmlComponent);
+        } catch {
+          // If injection fails, skip silently rather than break the whole export
+        }
+      }
     } else if (/^__TABLE\d+__$/.test(block)) {
       const tIdx = parseInt(block.replace(/^__TABLE(\d+)__$/, "$1"), 10);
       const tHtml = restoreB64(tableBlocks[tIdx] ?? "");

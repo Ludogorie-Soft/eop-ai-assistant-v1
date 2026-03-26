@@ -16,6 +16,7 @@ import mammoth from "mammoth";
 import { createHash } from "crypto";
 import { createLLM } from "./langchainClient";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
+import AdmZip from "adm-zip";
 
 export type OfferSectionType =
   | "introduction"
@@ -505,14 +506,92 @@ function extractSmrTechnologies(
  * Images are extracted with content hashes and stored as OFFER_IMG:[hash.ext] placeholders.
  * The caller (offerStorage.ts) uploads the imageMap to Supabase Storage.
  */
+/**
+ * Replaces mc:AlternateContent blocks that require the "wpg" (WordprocessingGroup)
+ * namespace with a sentinel XML comment that carries the original block as a
+ * base64-encoded attribute.
+ *
+ * Why: Mammoth extracts text from every wps:txbx inside wpg drawing groups,
+ * producing disconnected "floating" labels (e.g. flowchart node captions).
+ * We want to preserve the drawing for the final DOCX export while preventing
+ * mammoth from turning its text-box labels into stray paragraphs.
+ *
+ * The sentinel becomes a <div data-docx-drawing="…base64…"></div> in the HTML
+ * output, which htmlToDocxBody.ts later replaces with an ImportedXmlComponent
+ * so the drawing appears verbatim in the generated Word file.
+ *
+ * These drawings are self-contained (no external rId references), so they can
+ * be embedded in a different DOCX without any relationship remapping.
+ */
+function extractWpgDrawings(docxBuffer: Buffer): {
+  buffer: Buffer;
+  drawings: Map<string, string>; // sentinel-id → raw XML block
+} {
+  const drawings = new Map<string, string>();
+  const zip = new AdmZip(docxBuffer);
+  const entry = zip.getEntry("word/document.xml");
+  if (!entry) return { buffer: docxBuffer, drawings };
+
+  let xml = entry.getData().toString("utf-8");
+
+  const OPEN = "<mc:AlternateContent";
+  const CLOSE = "</mc:AlternateContent>";
+  const WPG_MARKER = 'mc:Choice Requires="wpg"';
+
+  const parts: string[] = [];
+  let i = 0;
+  let counter = 0;
+
+  while (i < xml.length) {
+    const openPos = xml.indexOf(OPEN, i);
+    if (openPos === -1) {
+      parts.push(xml.slice(i));
+      break;
+    }
+    parts.push(xml.slice(i, openPos));
+
+    const closePos = xml.indexOf(CLOSE, openPos);
+    if (closePos === -1) {
+      parts.push(xml.slice(openPos));
+      break;
+    }
+
+    const block = xml.slice(openPos, closePos + CLOSE.length);
+
+    if (block.includes(WPG_MARKER)) {
+      const id = `wpg_drawing_${counter++}`;
+      drawings.set(id, block);
+      // Replace with a plain text sentinel paragraph.
+      // Mammoth will render this as <p>DOCX_DRAWING:wpg_drawing_N</p> which we
+      // can later replace with <div data-docx-drawing="…base64…"></div>.
+      parts.push(
+        `<w:p><w:r><w:t>DOCX_DRAWING:${id}</w:t></w:r></w:p>`
+      );
+    } else {
+      parts.push(block);
+    }
+
+    i = closePos + CLOSE.length;
+  }
+
+  xml = parts.join("");
+  zip.updateFile("word/document.xml", Buffer.from(xml, "utf-8"));
+  return { buffer: zip.toBuffer(), drawings };
+}
+
 export async function parseOfferDocx(
   buffer: Buffer
 ): Promise<{ sections: ParsedOfferSection[]; imageMap: OfferImageMap }> {
   const imageMap: OfferImageMap = new Map();
 
+  // Pre-process: replace DrawingML group canvases (wpg) with sentinel text so
+  // mammoth doesn't extract their shape text-box labels as stray paragraphs.
+  // The drawings map carries the original XML blocks for later DOCX injection.
+  const { buffer: cleanBuffer, drawings: wpgDrawings } = extractWpgDrawings(buffer);
+
   // Step 1: mammoth DOCX → HTML with images as hashed placeholders
   const { value: fullHtml } = await mammoth.convertToHtml(
-    { buffer },
+    { buffer: cleanBuffer },
     {
       convertImage: mammoth.images.imgElement(async (image) => {
         const data = Buffer.from(await image.read());
@@ -531,8 +610,20 @@ export async function parseOfferDocx(
     }
   );
 
+  // Step 1b: Replace sentinel paragraphs with <div data-docx-drawing="…base64…">
+  // so the drawing XML survives the pipeline and can be re-injected into the
+  // generated DOCX by htmlToDocxBody.ts.
+  let processedHtml = fullHtml;
+  for (const [id, drawingXml] of wpgDrawings) {
+    const b64 = Buffer.from(drawingXml, "utf-8").toString("base64");
+    processedHtml = processedHtml.replace(
+      new RegExp(`<p>DOCX_DRAWING:${id}</p>`, "g"),
+      `<div data-docx-drawing="${b64}"></div>`
+    );
+  }
+
   // Step 2: Extract full plain text
-  const fullPlainText = htmlToPlainText(fullHtml);
+  const fullPlainText = htmlToPlainText(processedHtml);
   if (fullPlainText.length < 100) {
     throw new Error("Документът е твърде кратък или не може да бъде прочетен.");
   }
@@ -542,7 +633,7 @@ export async function parseOfferDocx(
   const aiSections = await identifySectionsWithAi(fullPlainText, headingCandidates);
 
   // Step 4: Split HTML using text search (accurate for table-heavy documents)
-  const highLevelSections = splitHtmlBySections(fullHtml, aiSections);
+  const highLevelSections = splitHtmlBySections(processedHtml, aiSections);
 
   // Step 5: Trim introduction — cut before "В изпълнение на задълженията"
   // (standard contract obligations block A.1–A.17, Б, В, НОРМАТИВИ that must not
@@ -580,7 +671,7 @@ export async function parseOfferDocx(
   // This handles documents with diverse structures: "Работна програма",
   // "Предложение за цялостния подход", incorrectly bounded sections, etc.
   if (smrTechnologiesFound.length === 0) {
-    smrTechnologiesFound = extractSmrTechnologies(fullHtml);
+    smrTechnologiesFound = extractSmrTechnologies(processedHtml);
   }
 
   // Build final sections: non-SMR sections from AI + individual SMR technologies
@@ -608,7 +699,7 @@ export async function parseOfferDocx(
     finalSections.push({
       section_type: "other",
       title: "Цялото съдържание",
-      html_content: fullHtml.slice(0, 1_000_000),
+      html_content: processedHtml.slice(0, 1_000_000),
       plain_text: fullPlainText.slice(0, 500_000),
       order_index: 0,
     });

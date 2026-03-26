@@ -15,6 +15,7 @@ import {
   LineRuleType,
   BorderStyle,
   Table,
+  ImportedXmlComponent,
 } from "docx";
 import { htmlToDocxElements } from "./htmlToDocxBody";
 import { resolveHtmlImages } from "./offerStorage";
@@ -172,7 +173,7 @@ export async function generateTenderDocx(
   teamOrganizationText?: string,
   communicationText?: string,
 ): Promise<{ buffer: Buffer; filename: string }> {
-  const paragraphs: (Paragraph | Table)[] = [];
+  const paragraphs: (Paragraph | Table | ImportedXmlComponent)[] = [];
   const hasIntroduction = Boolean(introductionText?.trim());
   const hasTeamOrg = Boolean(teamOrganizationText?.trim());
   const hasCommunication = Boolean(communicationText?.trim());
@@ -315,9 +316,14 @@ export async function generateTenderDocx(
         // Use rich HTML body: preserves bold, italic, bullet lists, images, and tables from the SMR template.
         // Tables are rendered 1:1 as DOCX Table objects (matching the original template structure).
         try {
-          let resolvedHtml = r.htmlBody.includes("/api/admin/offer-images/")
-            ? await resolveHtmlImages(r.htmlBody).catch(() => r.htmlBody!)
+          // Normalise any unresolved OFFER_IMG: placeholders left from a
+          // failed image upload so resolveHtmlImages can still download them.
+          let htmlForResolve = r.htmlBody.includes("OFFER_IMG:")
+            ? r.htmlBody.replace(/OFFER_IMG:([^"'\s]+)/g, "/api/admin/offer-images/$1")
             : r.htmlBody;
+          let resolvedHtml = htmlForResolve.includes("/api/admin/offer-images/")
+            ? await resolveHtmlImages(htmlForResolve).catch(() => htmlForResolve)
+            : htmlForResolve;
           // Strip any content that bled in from a different project's KSS/schedule/ЗБУТ sections.
           // These appear as heading-like paragraphs containing well-known section markers.
           resolvedHtml = stripNonSmrTrailingContent(resolvedHtml);
@@ -514,7 +520,8 @@ export async function generateTenderDocx(
     sections: [
       {
         properties: {},
-        children: paragraphs,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        children: paragraphs as any,
       },
     ],
   });

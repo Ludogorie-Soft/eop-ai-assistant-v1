@@ -451,6 +451,7 @@ function OfferUploadsSection() {
   const [offers, setOffers] = useState<OfferInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [reparsingId, setReparsingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -507,6 +508,27 @@ function OfferUploadsSection() {
       setError(err instanceof Error ? err.message : "Грешка при качване");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleReparse = async (id: string, name: string) => {
+    setReparsingId(id);
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      const res = await fetch("/api/admin/offers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const data = (await res.json()) as { error?: string; sectionCount?: number };
+      if (!res.ok) throw new Error(data.error ?? "Reparse failed");
+      setSuccessMsg(`"${name}" е преработена. Намерени ${data.sectionCount ?? 0} секции.`);
+      await fetchOffers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Грешка при преработване");
+    } finally {
+      setReparsingId(null);
     }
   };
 
@@ -623,6 +645,13 @@ function OfferUploadsSection() {
                   >
                     Свали
                   </a>
+                  <button
+                    onClick={() => handleReparse(offer.id, offer.filename)}
+                    disabled={reparsingId === offer.id}
+                    className="rounded-md border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                  >
+                    {reparsingId === offer.id ? "Преработва..." : "Преработи"}
+                  </button>
                   <button
                     onClick={() => handleDelete(offer.id, offer.filename)}
                     className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
