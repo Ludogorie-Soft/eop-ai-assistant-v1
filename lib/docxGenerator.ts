@@ -17,8 +17,9 @@ import {
   Table,
   ImportedXmlComponent,
 } from "docx";
-import { htmlToDocxElements } from "./htmlToDocxBody";
+import { htmlToDocxElements, type DrawingMediaEntry } from "./htmlToDocxBody";
 import { resolveHtmlImages } from "./offerStorage";
+import AdmZip from "adm-zip";
 
 const FONT = "Times New Roman";
 const FONT_SIZE = 22; // 11pt in half-points
@@ -165,6 +166,71 @@ function stripNonSmrTrailingContent(html: string): string {
   return boundary < html.length ? html.slice(0, boundary).trim() : html;
 }
 
+/**
+ * Post-process a docx.js Packer-generated buffer to inject drawing media files
+ * and their relationship entries.  Required when WPG/WPS drawings reference
+ * images (r:embed / v:imagedata r:id) that were extracted from the source DOCX.
+ */
+function injectDrawingMedia(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  docxBuffer: Buffer | any,
+  mediaFiles: Map<string, DrawingMediaEntry>,
+): Buffer {
+  const zip = new AdmZip(docxBuffer);
+
+  // Read existing rels (docx.js always produces this file)
+  const RELS_PATH = "word/_rels/document.xml.rels";
+  const relsEntry = zip.getEntry(RELS_PATH);
+  let relsXml = relsEntry
+    ? relsEntry.getData().toString("utf-8")
+    : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      "</Relationships>";
+
+  const IMAGE_TYPE =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+
+  // Track which file extensions need a new Default entry in [Content_Types].xml
+  const newExtensions = new Set<string>();
+
+  for (const [rId, { filename, data, contentType }] of mediaFiles) {
+    // Add the media binary
+    zip.addFile(`word/media/${filename}`, data);
+    // Append relationship entry before the closing tag
+    const rel = `<Relationship Id="${rId}" Type="${IMAGE_TYPE}" Target="media/${filename}"/>`;
+    relsXml = relsXml.replace("</Relationships>", rel + "</Relationships>");
+    // Track extension for content-type registration
+    const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+    if (ext) newExtensions.add(ext + "|" + contentType);
+    console.log(`[docxGenerator] injected media ${filename} as ${rId} (${contentType})`);
+  }
+
+  if (relsEntry) {
+    zip.updateFile(RELS_PATH, Buffer.from(relsXml, "utf-8"));
+  } else {
+    zip.addFile(RELS_PATH, Buffer.from(relsXml, "utf-8"));
+  }
+
+  // Ensure [Content_Types].xml has a Default entry for each new extension.
+  // Without this Word reports "unreadable content" even if the rels are correct.
+  const CT_PATH = "[Content_Types].xml";
+  const ctEntry = zip.getEntry(CT_PATH);
+  if (ctEntry && newExtensions.size > 0) {
+    let ctXml = ctEntry.getData().toString("utf-8");
+    for (const extType of newExtensions) {
+      const [ext, mime] = extType.split("|");
+      // Only add if a Default for this extension isn't already present
+      if (!ctXml.includes(`Extension="${ext}"`)) {
+        const entry = `<Default Extension="${ext}" ContentType="${mime}"/>`;
+        ctXml = ctXml.replace("</Types>", entry + "</Types>");
+      }
+    }
+    zip.updateFile(CT_PATH, Buffer.from(ctXml, "utf-8"));
+  }
+
+  return zip.toBuffer();
+}
+
 export async function generateTenderDocx(
   introductionText: string | undefined,
   rawText?: string,
@@ -174,6 +240,10 @@ export async function generateTenderDocx(
   communicationText?: string,
 ): Promise<{ buffer: Buffer; filename: string }> {
   const paragraphs: (Paragraph | Table | ImportedXmlComponent)[] = [];
+  // Collects media files from drawings that reference external images (e.g. wpg blocks
+  // with a:blip or v:imagedata).  Populated as a side-effect of htmlToDocxElements();
+  // injected into the ZIP after Packer.toBuffer() via injectDrawingMedia().
+  const docxMediaFiles = new Map<string, DrawingMediaEntry>();
   const hasIntroduction = Boolean(introductionText?.trim());
   const hasTeamOrg = Boolean(teamOrganizationText?.trim());
   const hasCommunication = Boolean(communicationText?.trim());
@@ -327,7 +397,7 @@ export async function generateTenderDocx(
           // Strip any content that bled in from a different project's KSS/schedule/ЗБУТ sections.
           // These appear as heading-like paragraphs containing well-known section markers.
           resolvedHtml = stripNonSmrTrailingContent(resolvedHtml);
-          const richElements = htmlToDocxElements(resolvedHtml);
+          const richElements = htmlToDocxElements(resolvedHtml, docxMediaFiles);
           paragraphs.push(...richElements);
         } catch (htmlErr) {
           console.warn(`[docxGenerator] HTML→DOCX failed for ${r.kssCode}, plain text fallback:`, htmlErr);
@@ -501,7 +571,7 @@ export async function generateTenderDocx(
     );
 
     try {
-      const commElements = htmlToDocxElements(communicationText);
+      const commElements = htmlToDocxElements(communicationText, docxMediaFiles);
       paragraphs.push(...commElements);
     } catch (err) {
       console.warn('[docxGenerator] Communication HTML→DOCX failed, plain text fallback:', err);
@@ -526,7 +596,13 @@ export async function generateTenderDocx(
     ],
   });
 
-  const buffer = Buffer.from(await Packer.toBuffer(doc));
+  let buffer: Buffer = Buffer.from(await Packer.toBuffer(doc));
+
+  // If any drawings bundled external media, inject them into the DOCX ZIP now.
+  if (docxMediaFiles.size > 0) {
+    buffer = injectDrawingMedia(buffer, docxMediaFiles);
+  }
+
   const orderNumber = rawText ? extractOrderNumber(rawText) : null;
   let filename: string;
   if (orderNumber) {

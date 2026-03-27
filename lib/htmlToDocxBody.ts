@@ -19,6 +19,14 @@ import {
   BorderStyle,
   ImportedXmlComponent,
 } from "docx";
+import type { DrawingBundle } from "./offerParser";
+
+/** Media file to be injected into the generated DOCX ZIP after Packer.toBuffer(). */
+export interface DrawingMediaEntry {
+  filename: string;    // target path under word/media/ in the generated DOCX
+  data: Buffer;        // binary content
+  contentType: string; // MIME type
+}
 
 const FONT = "Times New Roman";
 const FONT_SIZE = 22; // 11pt in half-points
@@ -631,7 +639,8 @@ function parseTableBlock(tableHtml: string): (Paragraph | Table)[] {
  * Returns an empty array for empty/null input.
  */
 export function htmlToDocxElements(
-  html: string
+  html: string,
+  mediaOut?: Map<string, DrawingMediaEntry> // rId → media entry; populated as a side-effect
 ): (Paragraph | Table | ImportedXmlComponent)[] {
   if (!html?.trim()) return [];
 
@@ -694,6 +703,81 @@ export function htmlToDocxElements(
     return out;
   };
 
+  /**
+   * Build a valid OOXML paragraph component containing a DrawingML block.
+   *
+   * ImportedXmlComponent.fromXmlString() returns an object with rootKey=undefined
+   * that wraps the real element as root[0].  Using root[0] directly gives the
+   * actual <w:p> component (rootKey="w:p"), which serialises correctly without
+   * a spurious <undefined> wrapper in the output document.
+   *
+   * The mc:AlternateContent MUST be inside <w:r> — placing it directly
+   * in <w:p> produces invalid OOXML that Word refuses to open.
+   */
+  const makeDrawingComponent = (drawXml: string): ImportedXmlComponent | null => {
+    const xmlStr =
+      `<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"` +
+      ` xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"` +
+      ` xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"` +
+      ` xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"` +
+      ` xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"` +
+      ` xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"` +
+      ` xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"` +
+      ` xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"` +
+      ` xmlns:v="urn:schemas-microsoft-com:vml"` +
+      ` xmlns:o="urn:schemas-microsoft-com:office:office"` +
+      ` xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing">` +
+      `<w:r>` +
+      drawXml +
+      `</w:r>` +
+      `</w:p>`;
+    try {
+      // fromXmlString returns { rootKey: undefined, root: [<w:p> component] }
+      // We use root[0] to get the actual <w:p> (rootKey="w:p"), avoiding the
+      // spurious <undefined> wrapper element.
+      const parsed = ImportedXmlComponent.fromXmlString(xmlStr);
+      const innerWP = (parsed as unknown as { root: ImportedXmlComponent[] }).root?.[0];
+      return (innerWP ?? parsed) as ImportedXmlComponent;
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Decode a base64 drawing payload from data-docx-drawing.
+   * Old format: base64(raw XML).
+   * New format: base64(JSON DrawingBundle with v:2, xml, media[]).
+   * Populates mediaOut with any referenced media files.
+   * Returns the ImportedXmlComponent for the drawing, or null on failure.
+   */
+  const resolveDrawingComponent = (b64: string): ImportedXmlComponent | null => {
+    try {
+      const decoded = Buffer.from(b64, "base64").toString("utf-8");
+      let drawXml = decoded;
+      // Try new bundle format
+      if (decoded.trimStart().startsWith("{")) {
+        try {
+          const bundle = JSON.parse(decoded) as DrawingBundle;
+          if (bundle?.v === 2 && bundle?.xml) {
+            drawXml = bundle.xml;
+            if (mediaOut && bundle.media?.length) {
+              for (const entry of bundle.media) {
+                mediaOut.set(entry.rId, {
+                  filename: entry.filename,
+                  data: Buffer.from(entry.data, "base64"),
+                  contentType: entry.contentType,
+                });
+              }
+            }
+          }
+        } catch { /* fall through to raw XML */ }
+      }
+      return makeDrawingComponent(drawXml);
+    } catch {
+      return null;
+    }
+  };
+
   const elements: (Paragraph | Table | ImportedXmlComponent)[] = [];
 
   // Step 0: Extract <div data-docx-drawing="…"> blocks before other processing.
@@ -754,7 +838,33 @@ export function htmlToDocxElements(
     const block = restoreB64(match[0]);
 
     if (/^<p/i.test(block)) {
-      elements.push(...parseParagraphBlock(block));
+      // Check if this paragraph contains a drawing placeholder (happens when
+      // mammoth nests the sentinel <w:p> inside the parent paragraph).
+      const drawMatch = block.match(/__DRAWING(\d+)__/);
+      if (drawMatch) {
+        const dIdx = parseInt(drawMatch[1], 10);
+        const b64 = drawingStore[dIdx];
+        if (b64) {
+          // Emit text before the drawing as a paragraph
+          const beforeDraw = block.slice(0, block.indexOf(drawMatch[0]));
+          const stripped = beforeDraw.replace(/<[^>]+>/g, "").trim();
+          if (stripped) elements.push(...parseParagraphBlock(beforeDraw + "</p>"));
+          // Emit the drawing itself
+          {
+            const comp = resolveDrawingComponent(b64);
+            if (comp) elements.push(comp);
+          }
+          // Emit text after the drawing as a paragraph
+          const afterStart = block.indexOf(drawMatch[0]) + drawMatch[0].length;
+          const afterDraw = block.slice(afterStart);
+          const afterStripped = afterDraw.replace(/<[^>]+>/g, "").trim();
+          if (afterStripped) elements.push(...parseParagraphBlock("<p>" + afterDraw));
+        } else {
+          elements.push(...parseParagraphBlock(block));
+        }
+      } else {
+        elements.push(...parseParagraphBlock(block));
+      }
     } else if (/^<ul|^<ol/i.test(block)) {
       elements.push(...parseListBlock(block));
     } else if (/^<img/i.test(block)) {
@@ -764,27 +874,8 @@ export function htmlToDocxElements(
       const dIdx = parseInt(block.replace(/^__DRAWING(\d+)__$/, "$1"), 10);
       const b64 = drawingStore[dIdx];
       if (b64) {
-        try {
-          const drawingXml = Buffer.from(b64, "base64").toString("utf-8");
-          // Wrap the mc:AlternateContent block in a <w:p> with all necessary
-          // namespace declarations so it is valid as a standalone XML fragment.
-          const wrappedXml =
-            `<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"` +
-            ` xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"` +
-            ` xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"` +
-            ` xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"` +
-            ` xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"` +
-            ` xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"` +
-            ` xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"` +
-            ` xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"` +
-            ` xmlns:v="urn:schemas-microsoft-com:vml"` +
-            ` xmlns:o="urn:schemas-microsoft-com:office:office">` +
-            drawingXml +
-            `</w:p>`;
-          elements.push(ImportedXmlComponent.fromXmlString(wrappedXml) as unknown as ImportedXmlComponent);
-        } catch {
-          // If injection fails, skip silently rather than break the whole export
-        }
+        const comp = resolveDrawingComponent(b64);
+        if (comp) elements.push(comp);
       }
     } else if (/^__TABLE\d+__$/.test(block)) {
       const tIdx = parseInt(block.replace(/^__TABLE(\d+)__$/, "$1"), 10);

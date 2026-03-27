@@ -520,27 +520,63 @@ function extractSmrTechnologies(
  * output, which htmlToDocxBody.ts later replaces with an ImportedXmlComponent
  * so the drawing appears verbatim in the generated Word file.
  *
- * These drawings are self-contained (no external rId references), so they can
- * be embedded in a different DOCX without any relationship remapping.
+ * Drawings with external rId references (r:embed / v:imagedata r:id) have their
+ * referenced media files extracted from the source ZIP and bundled as a JSON
+ * payload so the target DOCX can include them without broken relationships.
  */
+
+/** Payload stored in the data-docx-drawing attribute for drawings with media. */
+export interface DrawingBundle {
+  v: 2;
+  xml: string; // mc:AlternateContent with remapped rIds
+  media: {
+    rId: string;        // new safe rId used inside xml (e.g. "rId9001")
+    filename: string;   // target path in word/media/ of the generated DOCX
+    data: string;       // base64-encoded binary content
+    contentType: string;
+  }[];
+}
+
+/** Parse <Relationship Id="…" Target="…"/> entries from a rels XML string. */
+function parseRelsMap(relsXml: string): Map<string, string> {
+  const map = new Map<string, string>();
+  // Match entire <Relationship … /> elements then extract Id and Target separately.
+  // A single regex like /Id="..."[^/]*Target="..."/ breaks because the Type="http://…"
+  // value contains slashes, causing [^/]* to stop mid-attribute.
+  const relRe = /<Relationship\b([^>]*\/?>)/g;
+  let m: RegExpExecArray | null;
+  while ((m = relRe.exec(relsXml)) !== null) {
+    const attrs = m[1];
+    const idMatch = attrs.match(/\bId="([^"]+)"/);
+    const targetMatch = attrs.match(/\bTarget="([^"]+)"/);
+    if (idMatch && targetMatch) map.set(idMatch[1], targetMatch[1]);
+  }
+  return map;
+}
+
 function extractWpgDrawings(docxBuffer: Buffer): {
   buffer: Buffer;
-  drawings: Map<string, string>; // sentinel-id → raw XML block
+  drawings: Map<string, string>; // sentinel-id → raw XML (self-contained) or JSON DrawingBundle (with media)
 } {
   const drawings = new Map<string, string>();
   const zip = new AdmZip(docxBuffer);
   const entry = zip.getEntry("word/document.xml");
   if (!entry) return { buffer: docxBuffer, drawings };
 
+  const relsEntry = zip.getEntry("word/_rels/document.xml.rels");
+  const relsMap = relsEntry ? parseRelsMap(relsEntry.getData().toString("utf-8")) : new Map<string, string>();
+
   let xml = entry.getData().toString("utf-8");
 
   const OPEN = "<mc:AlternateContent";
   const CLOSE = "</mc:AlternateContent>";
   const WPG_MARKER = 'mc:Choice Requires="wpg"';
+  const WPS_MARKER = 'mc:Choice Requires="wps"';
 
   const parts: string[] = [];
   let i = 0;
   let counter = 0;
+  let rIdSeed = 9001; // high base to avoid collision with docx.js-generated rIds
 
   while (i < xml.length) {
     const openPos = xml.indexOf(OPEN, i);
@@ -558,15 +594,58 @@ function extractWpgDrawings(docxBuffer: Buffer): {
 
     const block = xml.slice(openPos, closePos + CLOSE.length);
 
-    if (block.includes(WPG_MARKER)) {
+    if (block.includes(WPG_MARKER) || block.includes(WPS_MARKER)) {
       const id = `wpg_drawing_${counter++}`;
-      drawings.set(id, block);
+
+      // Collect all external rId refs in this block
+      const embedRefs = [...block.matchAll(/r:embed="(rId\d+)"/g)].map((m) => m[1]);
+      const vmlRefs = [...block.matchAll(/<v:imagedata[^>]+r:id="(rId\d+)"/g)].map((m) => m[1]);
+      const externalRIds = [...new Set([...embedRefs, ...vmlRefs])];
+
+      if (externalRIds.length === 0) {
+        // Self-contained block — store raw XML (backward-compatible format)
+        drawings.set(id, block);
+      } else {
+        // Block has external media references — inline the media files
+        let patchedXml = block;
+        const mediaEntries: DrawingBundle["media"] = [];
+
+        for (const oldRId of externalRIds) {
+          const target = relsMap.get(oldRId); // e.g. "media/image72.png"
+          if (!target) continue;
+          const mediaEntry = zip.getEntry(`word/${target}`);
+          if (!mediaEntry) continue;
+
+          const newRId = `rId${rIdSeed++}`;
+          const origName = target.split("/").pop() ?? `img${mediaEntries.length}.bin`;
+          const filename = `wpg_${id}_${origName}`;
+          const ext = (origName.split(".").pop() ?? "png").toLowerCase();
+          const contentType =
+            ext === "jpg" || ext === "jpeg" ? "image/jpeg" :
+            ext === "emf" ? "image/x-emf" :
+            ext === "wmf" ? "image/x-wmf" :
+            `image/${ext}`;
+
+          mediaEntries.push({
+            rId: newRId,
+            filename,
+            data: mediaEntry.getData().toString("base64"),
+            contentType,
+          });
+
+          // Rewrite every occurrence of the old rId in the drawing XML
+          patchedXml = patchedXml.replace(new RegExp(`"${oldRId}"`, "g"), `"${newRId}"`);
+        }
+
+        const bundle: DrawingBundle = { v: 2, xml: patchedXml, media: mediaEntries };
+        drawings.set(id, JSON.stringify(bundle));
+      }
+
       // Replace with a plain text sentinel paragraph.
-      // Mammoth will render this as <p>DOCX_DRAWING:wpg_drawing_N</p> which we
-      // can later replace with <div data-docx-drawing="…base64…"></div>.
-      parts.push(
-        `<w:p><w:r><w:t>DOCX_DRAWING:${id}</w:t></w:r></w:p>`
-      );
+      // NOTE: This often creates a nested <w:p> because the original drawing
+      // is inside <w:r> within a parent <w:p>.  The sentinel replacement in
+      // parseOfferDocx() handles the resulting <p><p>SENTINEL</p></p> nesting.
+      parts.push(`<w:p><w:r><w:t>DOCX_DRAWING:${id}</w:t></w:r></w:p>`);
     } else {
       parts.push(block);
     }
@@ -613,12 +692,30 @@ export async function parseOfferDocx(
   // Step 1b: Replace sentinel paragraphs with <div data-docx-drawing="…base64…">
   // so the drawing XML survives the pipeline and can be re-injected into the
   // generated DOCX by htmlToDocxBody.ts.
+  //
+  // The original drawing lives inside <w:r> within <w:p>, so extractWpgDrawings()
+  // creates a nested <w:p> sentinel.  Mammoth renders this as nested <p> tags:
+  //   <p><p>DOCX_DRAWING:id</p></p>           — standalone
+  //   <p><p>DOCX_DRAWING:id</p>trailing</p>   — shared paragraph
+  // We must handle both to avoid the drawing div being trapped inside a <p>.
   let processedHtml = fullHtml;
   for (const [id, drawingXml] of wpgDrawings) {
     const b64 = Buffer.from(drawingXml, "utf-8").toString("base64");
+    const drawingDiv = `<div data-docx-drawing="${b64}"></div>`;
+    // Standalone nested: <p><p>SENTINEL</p></p>
+    processedHtml = processedHtml.replace(
+      new RegExp(`<p><p>DOCX_DRAWING:${id}</p></p>`, "g"),
+      drawingDiv
+    );
+    // Nested with trailing content: <p><p>SENTINEL</p>…</p> → drawing + new <p>
+    processedHtml = processedHtml.replace(
+      new RegExp(`<p><p>DOCX_DRAWING:${id}</p>`, "g"),
+      `${drawingDiv}<p>`
+    );
+    // Fallback: simple <p>SENTINEL</p> (when not nested)
     processedHtml = processedHtml.replace(
       new RegExp(`<p>DOCX_DRAWING:${id}</p>`, "g"),
-      `<div data-docx-drawing="${b64}"></div>`
+      drawingDiv
     );
   }
 
