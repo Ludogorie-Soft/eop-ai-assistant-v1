@@ -8,6 +8,7 @@ import {
   generateIntroduction,
   paraphraseCurrentState,
   paraphraseProjectSolution,
+  getIntroductionSourceFilesBySection,
 } from '@/lib/introductionGenerator';
 import { extractVerbatimSections, cleanVerbatimSection, buildFinalIntroduction } from '@/lib/verbatimSections';
 
@@ -22,7 +23,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { currentState, projectSolution } = extractVerbatimSections(sourceText);
+    const { currentState, projectSolution, currentStateSource, projectSolutionSource } =
+      extractVerbatimSections(sourceText);
+
+    // Per-section source files based on what each document type contributes
+    const { section1, section2, section3 } = getIntroductionSourceFilesBySection(sourceText);
 
     const [introduction, paraphrasedState, paraphrasedSolution] = await Promise.all([
       generateIntroduction(sourceText),
@@ -34,7 +39,13 @@ export async function POST(request: NextRequest) {
         : Promise.resolve(null),
     ]);
 
-    const result = buildFinalIntroduction(introduction, paraphrasedState, paraphrasedSolution);
+    const result = buildFinalIntroduction(introduction, paraphrasedState, paraphrasedSolution, {
+      section1,
+      section2,
+      section3,
+      currentStateSource,
+      projectSolutionSource,
+    });
 
     return NextResponse.json({ introduction: result });
   } catch (err) {

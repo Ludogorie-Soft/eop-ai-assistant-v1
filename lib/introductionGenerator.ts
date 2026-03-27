@@ -348,6 +348,71 @@ function isSectionHeading(line: string): boolean {
 // Main clean function
 // ---------------------------------------------------------------------------
 
+/**
+ * Returns per-section source file lists for AI-generated sections 1–3.
+ * Each section only lists files whose extracted content is actually relevant to that section:
+ *  - section1 "Предмет": parameters, documentation, techSpec, other
+ *  - section2 "Дейности": techSpec, explanatoryNote, other
+ *  - section3 "Нормативна рамка": techSpec, documentation, contract (guarantee)
+ */
+export function getIntroductionSourceFilesBySection(text: string): {
+  section1: string[];
+  section2: string[];
+  section3: string[];
+} {
+  const result = { section1: [] as string[], section2: [] as string[], section3: [] as string[] };
+  const sections = splitByFileMarkers(text);
+  if (sections.length <= 1 && !sections[0]?.filename) return result;
+
+  for (const section of sections) {
+    if (!section.filename) continue;
+    const bodyPreview = section.body.slice(0, 500);
+    const docType = classifyDocument(section.filename, bodyPreview);
+    switch (docType) {
+      case 'kss':
+        break;
+      case 'parameters':
+        result.section1.push(section.filename);
+        break;
+      case 'documentation': {
+        if (extractKeyParamsFromDocumentation(section.body)) {
+          result.section1.push(section.filename);
+          result.section3.push(section.filename);
+        }
+        break;
+      }
+      case 'techSpec': {
+        if (cleanTechSpec(section.body)) {
+          result.section1.push(section.filename);
+          result.section2.push(section.filename);
+          result.section3.push(section.filename);
+        }
+        break;
+      }
+      case 'explanatoryNote': {
+        if (cleanExplanatoryNote(section.body)) {
+          result.section2.push(section.filename);
+        }
+        break;
+      }
+      case 'contract': {
+        if (extractGuaranteeFromContract(section.body)) {
+          result.section3.push(section.filename);
+        }
+        break;
+      }
+      default: {
+        if (cleanTechSpec(section.body)) {
+          result.section1.push(section.filename);
+          result.section2.push(section.filename);
+        }
+        break;
+      }
+    }
+  }
+  return result;
+}
+
 /** Split source text by file markers, classify documents, and keep only relevant content */
 function cleanSourceText(text: string): string {
   const sections = splitByFileMarkers(text);

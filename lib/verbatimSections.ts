@@ -231,12 +231,31 @@ function findProjectSolutionCompound(text: string): string | null {
   return body.length > 50 ? body : null;
 }
 
+/** Split rawText into per-file sections using --- filename --- markers */
+export function splitByFileMarkers(text: string): Array<{ filename: string; body: string }> {
+  const marker = /^---\s+(.+?)\s+---$/gm;
+  const positions: { filename: string; start: number }[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = marker.exec(text)) !== null) {
+    positions.push({ filename: match[1], start: match.index + match[0].length });
+  }
+  if (positions.length === 0) return [{ filename: '', body: text }];
+  return positions.map((pos, i) => {
+    const end = i + 1 < positions.length
+      ? text.lastIndexOf('---', positions[i + 1].start)
+      : text.length;
+    return { filename: pos.filename, body: text.slice(pos.start, end).trim() };
+  });
+}
+
 export function extractVerbatimSections(rawText: string): {
   currentState: string | null;
   projectSolution: string | null;
+  currentStateSource: string | null;
+  projectSolutionSource: string | null;
 } {
   if (!rawText?.trim()) {
-    return { currentState: null, projectSolution: null };
+    return { currentState: null, projectSolution: null, currentStateSource: null, projectSolutionSource: null };
   }
 
   const currentState =
@@ -247,7 +266,27 @@ export function extractVerbatimSections(rawText: string): {
     findSection(rawText, HEADING_PROJECT_SOLUTION, PROJECT_SOLUTION_STOP_PATTERNS) ??
     findProjectSolutionCompound(rawText);
 
-  return { currentState, projectSolution };
+  // Determine which file each verbatim section came from
+  let currentStateSource: string | null = null;
+  let projectSolutionSource: string | null = null;
+  const fileSections = splitByFileMarkers(rawText);
+  for (const { filename, body } of fileSections) {
+    if (!filename) continue;
+    if (!currentStateSource && currentState) {
+      const found =
+        findSection(body, HEADING_CURRENT_STATE, EXISTING_STATE_STOP_PATTERNS) ??
+        findExistingStateSection(body);
+      if (found) currentStateSource = filename;
+    }
+    if (!projectSolutionSource && projectSolution) {
+      const found =
+        findSection(body, HEADING_PROJECT_SOLUTION, PROJECT_SOLUTION_STOP_PATTERNS) ??
+        findProjectSolutionCompound(body);
+      if (found) projectSolutionSource = filename;
+    }
+  }
+
+  return { currentState, projectSolution, currentStateSource, projectSolutionSource };
 }
 
 /** Clean a raw verbatim section (strip boilerplate and KSS) */
@@ -262,14 +301,70 @@ export function buildFinalIntroduction(
   introductionText: string,
   currentState: string | null,
   paraphrasedProjectSolution: string | null,
+  sources?: {
+    /** Per-section source files for AI-generated sections 1, 2, 3 */
+    section1?: string[];
+    section2?: string[];
+    section3?: string[];
+    currentStateSource?: string | null;
+    projectSolutionSource?: string | null;
+  },
 ): string {
-  const parts = [introductionText.trim()];
+  const makeCitation = (files: string[]) =>
+    files.length > 0 ? `[извлечено от ${files.join(', ')}]` : '';
+
+  // Inject per-section citations into the AI-generated intro (sections 1–3).
+  // Split on lines that start a new numbered section (e.g. "\n\n2. " or "\n\n3. ").
+  let intro = introductionText.trim();
+  if (sources && (sources.section1?.length || sources.section2?.length || sources.section3?.length)) {
+    const sectionSources: Record<number, string[]> = {
+      1: sources.section1 ?? [],
+      2: sources.section2 ?? [],
+      3: sources.section3 ?? [],
+    };
+
+    // Split intro text into chunks per section heading
+    const chunks: { num: number; text: string }[] = [];
+    const headingRe = /(?:^|\n\n)([1-3])\. /g;
+    let lastIdx = 0;
+    let lastNum = 0;
+    let m: RegExpExecArray | null;
+
+    while ((m = headingRe.exec(intro)) !== null) {
+      const num = parseInt(m[1], 10);
+      if (lastNum > 0) {
+        chunks.push({ num: lastNum, text: intro.slice(lastIdx, m.index) });
+      }
+      lastIdx = m.index === 0 ? 0 : m.index + 2; // skip leading \n\n
+      lastNum = num;
+    }
+    if (lastNum > 0) {
+      chunks.push({ num: lastNum, text: intro.slice(lastIdx) });
+    }
+
+    if (chunks.length > 0) {
+      intro = chunks
+        .map(({ num, text }) => {
+          const citation = makeCitation(sectionSources[num] ?? []);
+          return citation ? text.trimEnd() + '\n' + citation : text.trimEnd();
+        })
+        .join('\n\n');
+    }
+  }
+
+  const parts = [intro];
 
   if (currentState?.trim()) {
-    parts.push(`4. Текущо състояние\n\n${currentState}`);
+    const citation = sources?.currentStateSource
+      ? `\n${makeCitation([sources.currentStateSource])}`
+      : '';
+    parts.push(`4. Текущо състояние\n\n${currentState}${citation}`);
   }
   if (paraphrasedProjectSolution?.trim()) {
-    parts.push(`5. Проектно решение\n\n${paraphrasedProjectSolution}`);
+    const citation = sources?.projectSolutionSource
+      ? `\n${makeCitation([sources.projectSolutionSource])}`
+      : '';
+    parts.push(`5. Проектно решение\n\n${paraphrasedProjectSolution}${citation}`);
   }
 
   return parts.join('\n\n');
@@ -280,8 +375,11 @@ export function appendVerbatimSections(
   introductionText: string,
   rawText: string
 ): string {
-  const { currentState, projectSolution } = extractVerbatimSections(rawText);
+  const { currentState, projectSolution, currentStateSource, projectSolutionSource } = extractVerbatimSections(rawText);
   const cleanedState = currentState ? cleanVerbatimSection(currentState) : null;
   const cleanedSolution = projectSolution ? cleanVerbatimSection(projectSolution) : null;
-  return buildFinalIntroduction(introductionText, cleanedState, cleanedSolution);
+  return buildFinalIntroduction(introductionText, cleanedState, cleanedSolution, {
+    currentStateSource,
+    projectSolutionSource,
+  });
 }

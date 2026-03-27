@@ -288,6 +288,7 @@ export async function generateTenderDocx(
     }
 
     const blocks = (introductionText ?? "")
+      .replace(/\n?\[извлечено от [^\]]+\]/g, "")
       .split(/\n\n+/)
       .map((s) => s.trim().replace(/\*\*([^*]+)\*\*/g, "$1"))
       .filter((b) => {
