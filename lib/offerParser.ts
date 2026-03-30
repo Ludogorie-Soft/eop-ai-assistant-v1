@@ -399,7 +399,16 @@ function extractSmrTechnologies(
     // not a fixed 4000-char window that could bleed into subsequent tables/text.
     const tableEnd = findTableEnd(smrHtml, pos);
     const preview = smrHtml.slice(pos, tableEnd);
-    const previewLower = preview.toLowerCase();
+    // Normalize Latin/Cyrillic homoglyphs (some DOCX files mix Latin "T", "c", "o"
+    // etc. with Cyrillic text, causing keyword detection to fail).
+    const previewLower = preview.toLowerCase()
+      .replace(/t/g, "т")  // Latin t → Cyrillic т
+      .replace(/c/g, "с")  // Latin c → Cyrillic с
+      .replace(/o/g, "о")  // Latin o → Cyrillic о
+      .replace(/a/g, "а")  // Latin a → Cyrillic а
+      .replace(/e/g, "е")  // Latin e → Cyrillic е
+      .replace(/p/g, "р")  // Latin p → Cyrillic р
+      .replace(/x/g, "х"); // Latin x → Cyrillic х
 
     // Count how many of the 4 SMR resource keywords appear in this table.
     // A genuine SMR header table contains multiple resource rows (Ангажирани
@@ -753,22 +762,42 @@ export async function parseOfferDocx(
   let orderIndex = 0;
 
   // First, try extracting SMR technologies from the AI-identified section
-  let smrTechnologiesFound: { name: string; html: string; plainText: string }[] = [];
+  let smrFromAiSection: { name: string; html: string; plainText: string }[] = [];
 
   for (const section of highLevelSections) {
     if (section.section_type === "smr_technology") {
-      smrTechnologiesFound = extractSmrTechnologies(section.html_content);
+      smrFromAiSection = extractSmrTechnologies(section.html_content);
       break;
     }
   }
 
-  // If the AI-identified section yielded no individual SMR tables (either because
-  // the AI didn't find an smr_technology section, or because the section boundaries
-  // were wrong), fall back to scanning the FULL HTML for SMR tables.
-  // This handles documents with diverse structures: "Работна програма",
-  // "Предложение за цялостния подход", incorrectly bounded sections, etc.
-  if (smrTechnologiesFound.length === 0) {
-    smrTechnologiesFound = extractSmrTechnologies(processedHtml);
+  // ALWAYS also scan the full HTML — AI section boundaries can be wrong, cutting
+  // off SMR tables that appear before or after the identified section.
+  // Merge results by normalized title, preferring the AI-section version (it has
+  // tighter boundaries and avoids KSS table bleed).
+  const smrFromFullHtml = extractSmrTechnologies(processedHtml);
+
+  const normalizeSmrName = (s: string) =>
+    s.toLowerCase().replace(/[.,;:!?–—\-()]/g, " ").replace(/\s+/g, " ").trim();
+
+  const seenNames = new Set<string>();
+  const smrTechnologiesFound: { name: string; html: string; plainText: string }[] = [];
+
+  // Add AI-section results first (preferred — tighter boundaries)
+  for (const t of smrFromAiSection) {
+    const norm = normalizeSmrName(t.name);
+    if (!seenNames.has(norm)) {
+      seenNames.add(norm);
+      smrTechnologiesFound.push(t);
+    }
+  }
+  // Then add any full-HTML results that the AI section missed
+  for (const t of smrFromFullHtml) {
+    const norm = normalizeSmrName(t.name);
+    if (!seenNames.has(norm)) {
+      seenNames.add(norm);
+      smrTechnologiesFound.push(t);
+    }
   }
 
   // Build final sections: non-SMR sections from AI + individual SMR technologies
