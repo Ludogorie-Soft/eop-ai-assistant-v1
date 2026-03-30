@@ -501,6 +501,46 @@ function extractSmrTechnologies(
     result.push({ name: smrStarts[i].name, html, plainText });
   }
 
+  // ---------------------------------------------------------------------------
+  // Post-process: extend SHORT entries with the shared description from their
+  // group.  Many Bulgarian offers list several resource tables in a row, then
+  // write one combined "Технология за изпълнение" section that covers all of
+  // them.  Without this step the first N-1 tables in such a group contain only
+  // the resource rows (~300-500 chars) while the last one gets ~70K chars of
+  // combined description.
+  //
+  // Algorithm: walk backwards — when a SHORT entry (plainText < threshold) is
+  // followed by a LONG entry, append the LONG entry's description text (the
+  // content after its resource table) to the SHORT entry.  This gives every
+  // position in the group its own copy of the shared description.
+  // ---------------------------------------------------------------------------
+  const SHORT_THRESHOLD = 1200; // chars of plain text — resource-only tables are ~300-600
+
+  for (let i = result.length - 2; i >= 0; i--) {
+    if (result[i].plainText.length >= SHORT_THRESHOLD) continue;
+
+    // Find the nearest following entry that has substantial content
+    let donor: (typeof result)[number] | null = null;
+    for (let j = i + 1; j < result.length; j++) {
+      if (result[j].plainText.length >= SHORT_THRESHOLD) {
+        donor = result[j];
+        break;
+      }
+    }
+    if (!donor) continue;
+
+    // Extract the description portion of the donor — everything AFTER its
+    // resource table (the first </table> in the donor HTML).
+    const donorTableClose = donor.html.indexOf("</table>");
+    if (donorTableClose < 0) continue;
+    const sharedDescription = donor.html.slice(donorTableClose + "</table>".length).trim();
+    if (sharedDescription.length < 200) continue;
+
+    // Append the shared description to the short entry
+    result[i].html = result[i].html + sharedDescription;
+    result[i].plainText = htmlToPlainText(result[i].html).trim();
+  }
+
   return result;
 }
 

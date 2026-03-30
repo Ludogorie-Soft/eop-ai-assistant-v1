@@ -156,6 +156,17 @@ function parseLlmJson(content: string): LlmMatch | null {
   }
 }
 
+function normalizeTitle(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/t/g, "т").replace(/c/g, "с").replace(/o/g, "о")
+    .replace(/a/g, "а").replace(/e/g, "е").replace(/p/g, "р").replace(/x/g, "х")
+    .replace(/^["'„“”«»]+|["'„“”«»]+$/g, "")
+    .replace(/[.,;:!?–—\-()\/\\[\]{}]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /**
  * Find best matching SMR template for a single KSS position name.
  * If confidence < 75 or matchedTitle is "NONE", returns text "[не е намерен]";
@@ -170,6 +181,20 @@ export async function matchKssToSmr(
   }
   if (smrTemplates.length === 0) {
     return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
+  }
+
+  // Deterministic fast-path: exact normalized title match should never be lost.
+  const normalizedKss = normalizeTitle(kssName);
+  const exactTemplate = smrTemplates.find(
+    (t) => normalizeTitle(t.title) === normalizedKss,
+  );
+  if (exactTemplate) {
+    return {
+      text: exactTemplate.body,
+      confidence: 100,
+      matchedTitle: exactTemplate.title,
+      htmlBody: exactTemplate.htmlBody,
+    };
   }
 
   // Pre-filter to top candidates so the LLM prompt stays short & focused
@@ -291,19 +316,27 @@ export async function matchKssToSmr(
     return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
   }
 
-  const normalizeTitle = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
   const template = smrTemplates.find(
     (t) => normalizeTitle(t.title) === normalizeTitle(parsed.matchedTitle),
   );
 
-  if (!template) {
+  const fallbackTemplate = candidates.find(
+    (t) => normalizeTitle(t.title) === normalizeTitle(parsed.matchedTitle),
+  );
+
+  if (!template && !fallbackTemplate) {
+    return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
+  }
+
+  const resolvedTemplate = template ?? fallbackTemplate;
+  if (!resolvedTemplate) {
     return { text: "[не е намерен]", confidence: 0, matchedTitle: null };
   }
 
   return {
-    text: template.body,
+    text: resolvedTemplate.body,
     confidence,
-    matchedTitle: template.title,
-    htmlBody: template.htmlBody,
+    matchedTitle: resolvedTemplate.title,
+    htmlBody: resolvedTemplate.htmlBody,
   };
 }
