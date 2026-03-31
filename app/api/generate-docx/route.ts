@@ -14,11 +14,12 @@ import {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { introductionText, rawText, smrResults, teamOrganizationText } = body as {
+    const { introductionText, rawText, smrResults, teamOrganizationText, communicationText } = body as {
       introductionText?: string;
       rawText?: string;
       smrResults?: SmrResultForDocx[];
       teamOrganizationText?: string;
+      communicationText?: string;
     };
     const hasIntroduction =
       typeof introductionText === "string" &&
@@ -68,6 +69,7 @@ export async function POST(request: NextRequest) {
       smr,
       satelliteImage,
       typeof teamOrganizationText === "string" ? teamOrganizationText : undefined,
+      typeof communicationText === "string" && communicationText.trim() ? communicationText : undefined,
     );
 
     const asciiFallback = "tender.docx";
@@ -83,7 +85,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     const message =
-      err instanceof Error ? err.message : "Failed to generate DOCX";
+      err instanceof Error ? err.message : "Грешка при генериране на DOCX файла";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

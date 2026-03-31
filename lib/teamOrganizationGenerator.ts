@@ -15,6 +15,8 @@ import {
   TEAM_REVERSE_MATCHER_USER_PROMPT_TEMPLATE,
   TEAM_PARAPHRASER_SYSTEM_PROMPT,
   TEAM_PARAPHRASER_USER_PROMPT_TEMPLATE,
+  SUPPORT_STAFF_SYSTEM_PROMPT,
+  SUPPORT_STAFF_USER_PROMPT_TEMPLATE,
 } from './prompts/teamPrompt';
 import { searchSimilarSections } from './offerEmbeddings';
 
@@ -300,7 +302,41 @@ export async function generateTeamOrganization(
     if (res) results.push(res);
   }
 
-  return formatOutput(results);
+  // 3) Generate support staff (помощен персонал) section
+  const projectDescription = rawText.slice(0, 2000);
+  const supportStaffText = await generateSupportStaff(projectDescription, kssContext);
+
+  const keyPersonnelText = formatOutput(results);
+
+  // Combine key personnel + support staff
+  const separator = '\n\n' + '═'.repeat(50) + '\n\n';
+  const supportHeader = 'ПОМОЩЕН ПЕРСОНАЛ\n\n' +
+    'Освен ключовите експерти, за качественото изпълнение на строително-монтажните работи ще бъде осигурен и следният помощен персонал:';
+
+  return keyPersonnelText + separator + supportHeader + '\n\n' + supportStaffText;
+}
+
+async function generateSupportStaff(
+  projectDescription: string,
+  kssContext: string,
+): Promise<string> {
+  const llm = createLLM({ temperature: 0.2, maxTokens: 16384 });
+  const prompt = ChatPromptTemplate.fromMessages([
+    ['system', SUPPORT_STAFF_SYSTEM_PROMPT],
+    ['human', SUPPORT_STAFF_USER_PROMPT_TEMPLATE],
+  ]);
+
+  const chain = prompt.pipe(llm);
+  const response = await chain.invoke({
+    projectDescription: projectDescription.slice(0, 2000),
+    kssContext: kssContext || '(няма данни от КСС)',
+  });
+
+  const content = typeof response.content === 'string' ? response.content : '';
+  return content
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/🔹/g, '')
+    .trim();
 }
 
 function formatOutput(results: TeamOrganizationResult[]): string {

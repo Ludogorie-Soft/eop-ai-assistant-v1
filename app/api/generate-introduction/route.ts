@@ -8,6 +8,7 @@ import {
   generateIntroduction,
   paraphraseCurrentState,
   paraphraseProjectSolution,
+  getIntroductionSourceFilesBySection,
 } from '@/lib/introductionGenerator';
 import { extractVerbatimSections, cleanVerbatimSection, buildFinalIntroduction } from '@/lib/verbatimSections';
 
@@ -17,12 +18,16 @@ export async function POST(request: NextRequest) {
     const { sourceText } = body as { sourceText?: string };
     if (!sourceText || typeof sourceText !== 'string') {
       return NextResponse.json(
-        { error: 'Source text is required' },
+        { error: 'Изходният текст е задължителен' },
         { status: 400 }
       );
     }
 
-    const { currentState, projectSolution } = extractVerbatimSections(sourceText);
+    const { currentState, projectSolution, currentStateSource, projectSolutionSource } =
+      extractVerbatimSections(sourceText);
+
+    // Per-section source files based on what each document type contributes
+    const { section1, section2, section3 } = getIntroductionSourceFilesBySection(sourceText);
 
     const [introduction, paraphrasedState, paraphrasedSolution] = await Promise.all([
       generateIntroduction(sourceText),
@@ -34,12 +39,18 @@ export async function POST(request: NextRequest) {
         : Promise.resolve(null),
     ]);
 
-    const result = buildFinalIntroduction(introduction, paraphrasedState, paraphrasedSolution);
+    const result = buildFinalIntroduction(introduction, paraphrasedState, paraphrasedSolution, {
+      section1,
+      section2,
+      section3,
+      currentStateSource,
+      projectSolutionSource,
+    });
 
     return NextResponse.json({ introduction: result });
   } catch (err) {
     const message =
-      err instanceof Error ? err.message : 'Failed to generate introduction';
+      err instanceof Error ? err.message : 'Грешка при генериране на увода';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

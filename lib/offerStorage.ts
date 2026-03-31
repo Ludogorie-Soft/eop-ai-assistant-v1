@@ -446,20 +446,24 @@ export async function loadSmrTemplatesFromOffers(): Promise<
   if (error) throw new Error(`Failed to load SMR templates: ${error.message}`);
   if (!data || data.length === 0) return [];
 
-  // Deduplicate by normalized title — keep the first (oldest) version
-  const seen = new Set<string>();
-  const templates: { title: string; body: string; htmlBody: string }[] = [];
+  // Deduplicate by normalized title — keep the version with the LONGEST plain_text.
+  // Different offers may describe the same technology with varying detail; the richest
+  // version (with full "Технология за изпълнение" description) produces better output.
+  const bestByTitle = new Map<string, { title: string; body: string; htmlBody: string }>();
 
   for (const row of data) {
     const norm = normalizeTitle(row.title);
-    if (seen.has(norm)) continue;
-    seen.add(norm);
-    templates.push({
-      title: row.title,
-      body: row.plain_text,
-      htmlBody: row.html_content,
-    });
+    const existing = bestByTitle.get(norm);
+    if (!existing || (row.plain_text?.length ?? 0) > (existing.body?.length ?? 0)) {
+      bestByTitle.set(norm, {
+        title: row.title,
+        body: row.plain_text,
+        htmlBody: row.html_content,
+      });
+    }
   }
+
+  const templates = [...bestByTitle.values()];
 
   return templates;
 }

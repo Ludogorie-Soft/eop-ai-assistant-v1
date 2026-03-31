@@ -11,28 +11,223 @@ export type SmrResult = {
   htmlBody?: string;
 };
 
+export type ValidationResultMap = Record<
+  string,
+  {
+    reference: string;
+    status: "valid" | "withdrawn" | "under_review" | "replaced" | "unknown";
+    statusCode?: string;
+    currentTitle?: string;
+    replacement?: string;
+    note?: string;
+    lastChecked: string;
+    source: string;
+    inlineDescription?: string;
+    extractedTitle?: string;
+    titleMismatch?: boolean;
+    replacedBy?: string;
+    draftVersion?: string;
+    sourceUrl?: string;
+  }
+>;
+
 interface KssSmrSectionProps {
   smrResults: SmrResult[];
   onSmrResultsUpdate: (results: SmrResult[]) => void;
+  onValidationResults?: (results: ValidationResultMap) => void;
 }
 
-function formatResultsAsText(results: SmrResult[]): string {
-  if (!results.length) return "";
-  return results
-    .map(
-      (r) =>
-        `${r.kssCode} – ${r.kssName} (увереност: ${r.confidence}%)\n${r.text}`,
-    )
-    .join("\n\n---\n\n");
+const STATUS_ORDER: ValidationResultMap[string]["status"][] = [
+  "withdrawn", "replaced", "under_review", "unknown", "valid",
+];
+
+const STATUS_LABEL: Record<ValidationResultMap[string]["status"], string> = {
+  withdrawn: "Оттеглен",
+  replaced: "За замяна",
+  under_review: "В преразглеждане",
+  unknown: "Неизвестен",
+  valid: "Валиден",
+};
+
+const STATUS_CLASSES: Record<ValidationResultMap[string]["status"], string> = {
+  withdrawn: "bg-red-100 text-red-800",
+  replaced: "bg-orange-100 text-orange-800",
+  under_review: "bg-amber-100 text-amber-800",
+  unknown: "bg-neutral-100 text-neutral-600",
+  valid: "bg-green-100 text-green-800",
+};
+
+function ValidationDetailsTable({ results }: { results: ValidationResultMap }) {
+  const entries = Object.values(results).sort((a, b) => {
+    const ai = STATUS_ORDER.indexOf(a.status);
+    const bi = STATUS_ORDER.indexOf(b.status);
+    if (ai !== bi) return ai - bi;
+    return a.reference.localeCompare(b.reference, "bg");
+  });
+
+  return (
+    <div className="mt-3 max-h-80 overflow-auto rounded border border-amber-200">
+      <table className="w-full text-xs">
+        <thead className="sticky top-0 bg-amber-100 text-amber-900">
+          <tr>
+            <th className="px-2 py-1.5 text-left font-medium">Стандарт</th>
+            <th className="px-2 py-1.5 text-left font-medium">Статус</th>
+            <th className="px-2 py-1.5 text-left font-medium">Код</th>
+            <th className="px-2 py-1.5 text-left font-medium">Официално заглавие / Бележка</th>
+            <th className="px-2 py-1.5 text-left font-medium">Описание в текста</th>
+            <th className="px-2 py-1.5 text-left font-medium">Линк</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-amber-100">
+          {entries.map((r) => (
+            <tr key={r.reference} className="bg-white hover:bg-amber-50">
+              <td className="px-2 py-1.5 font-mono font-medium text-neutral-800 whitespace-nowrap">
+                {r.reference}
+              </td>
+              <td className="px-2 py-1.5">
+                <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${STATUS_CLASSES[r.status]}`}>
+                  {STATUS_LABEL[r.status]}
+                </span>
+                {r.status === "replaced" && (
+                  <span className={`ml-1.5 text-xs ${r.replacedBy ? "text-blue-700" : r.draftVersion ? "text-amber-700" : "text-orange-600"}`}>
+                    {r.replacedBy ? "✅ нова" : r.draftVersion ? "🔄 чернова" : "⏳ чака"}
+                  </span>
+                )}
+              </td>
+              <td className="px-2 py-1.5 text-neutral-500 whitespace-nowrap">
+                {r.statusCode ?? "—"}
+              </td>
+              <td className="px-2 py-1.5 text-neutral-600">
+                {r.status === "replaced" && r.replacedBy ? (
+                  <span>
+                    <span className="text-neutral-400 line-through">{r.currentTitle}</span>
+                    <span className="ml-1 font-medium text-blue-700">→ {r.replacedBy}</span>
+                  </span>
+                ) : r.status === "replaced" && r.draftVersion ? (
+                  <span className="flex flex-col gap-0.5">
+                    <span>{r.currentTitle}</span>
+                    <span className="text-amber-700 text-xs">Очаква се: {r.draftVersion}</span>
+                  </span>
+                ) : (
+                  r.currentTitle ?? r.note ?? "—"
+                )}
+              </td>
+              <td className="px-2 py-1.5">
+                {(() => {
+                  const docTitle = r.extractedTitle ?? r.inlineDescription;
+                  if (!docTitle) return <span className="text-neutral-400">—</span>;
+                  if (r.titleMismatch) {
+                    return (
+                      <span className="flex flex-col gap-0.5">
+                        <span className="font-medium text-red-700" title="Заглавието в документа не съответства на официалното от БДС">
+                          ⚠️ В документа: {docTitle}
+                        </span>
+                        {r.currentTitle && (
+                          <span className="text-xs text-neutral-500">
+                            Официално: {r.currentTitle}
+                          </span>
+                        )}
+                      </span>
+                    );
+                  }
+                  return (
+                    <span className={r.extractedTitle ? "text-neutral-700" : "text-neutral-500"}>
+                      {docTitle}
+                    </span>
+                  );
+                })()}
+              </td>
+              <td className="px-2 py-1.5 whitespace-nowrap">
+                {r.sourceUrl ? (
+                  <a
+                    href={r.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 underline"
+                  >
+                    Провери
+                  </a>
+                ) : (
+                  <span className="text-neutral-400">—</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function confidenceClass(confidence: number): string {
+  if (confidence >= 80) return "bg-green-100 text-green-800";
+  if (confidence >= 60) return "bg-amber-100 text-amber-800";
+  return "bg-red-100 text-red-800";
+}
+
+function SmrResultsTable({ results }: { results: SmrResult[] }) {
+  if (!results.length) {
+    return (
+      <p className="mt-3 rounded-md border border-neutral-200 bg-neutral-50 px-4 py-6 text-center text-sm text-neutral-400">
+        Резултатите ще се появят след генериране.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3 max-h-96 overflow-auto rounded-md border border-neutral-200">
+      <table className="w-full text-xs">
+        <thead className="sticky top-0 bg-neutral-100 text-neutral-700">
+          <tr>
+            <th className="px-3 py-2 text-left font-medium">Позиция от KSS (СМР)</th>
+            <th className="px-3 py-2 text-left font-medium">Намерен шаблон</th>
+            <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Увереност</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-neutral-100">
+          {results.map((r, i) => (
+            <tr key={i} className="bg-white hover:bg-neutral-50">
+              <td className="px-3 py-2 text-neutral-800">
+                {r.kssCode && (
+                  <span className="mr-1.5 font-mono text-neutral-500">{r.kssCode}</span>
+                )}
+                {r.kssName}
+              </td>
+              <td className="px-3 py-2 text-neutral-600">
+                {r.matchedTitle ?? <span className="italic text-neutral-400">не е намерен</span>}
+              </td>
+              <td className="px-3 py-2">
+                <span className={`rounded px-1.5 py-0.5 font-medium ${confidenceClass(r.confidence)}`}>
+                  {r.confidence}%
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export function KssSmrSection({
   smrResults,
   onSmrResultsUpdate,
+  onValidationResults,
 }: KssSmrSectionProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [validationSummary, setValidationSummary] = useState<{
+    total: number;
+    valid: number;
+    withdrawn: number;
+    underReview: number;
+    replaced: number;
+    unknown: number;
+  } | null>(null);
+  const [validationDetails, setValidationDetails] = useState<ValidationResultMap | null>(null);
+  const [showValidationDetails, setShowValidationDetails] = useState(false);
   const kssInputRef = useRef<HTMLInputElement>(null);
 
   const handleGenerate = async () => {
@@ -50,6 +245,9 @@ export function KssSmrSection({
     setLoading(true);
     setError(null);
     setWarning(null);
+    setValidationSummary(null);
+    setValidationDetails(null);
+    setShowValidationDetails(false);
     try {
       const formData = new FormData();
       for (const file of kssFiles) {
@@ -82,11 +280,38 @@ export function KssSmrSection({
     }
   };
 
-  const displayText = formatResultsAsText(smrResults);
+  const handleValidateStandards = async () => {
+    if (smrResults.length === 0) return;
+    setValidating(true);
+    setValidationSummary(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/validate-standards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ smrResults }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        summary?: typeof validationSummary;
+        validations?: ValidationResultMap;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error ?? "Грешка при валидация");
+      setValidationSummary(data.summary ?? null);
+      setValidationDetails(data.validations ?? null);
+      if (data.validations) onValidationResults?.(data.validations);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Грешка при валидация на стандарти"
+      );
+    } finally {
+      setValidating(false);
+    }
+  };
 
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-      <h2 className="text-lg font-semibold text-neutral-800">
+    <section className="border-b border-neutral-100 py-10">
+      <h2 className="text-xl font-semibold text-neutral-900">
         Текстове за КСС (от KSS + Шаблони)
       </h2>
       <p className="mt-1 text-sm text-neutral-600">
@@ -109,7 +334,7 @@ export function KssSmrSection({
         />
       </div>
 
-      <div className="mt-3">
+      <div className="mt-3 flex flex-wrap gap-2">
         <button
           onClick={handleGenerate}
           disabled={loading}
@@ -117,7 +342,72 @@ export function KssSmrSection({
         >
           {loading ? "Генериране..." : "Генерирай текстове СМР за КСС"}
         </button>
+        {smrResults.length > 0 && (
+          <button
+            onClick={handleValidateStandards}
+            disabled={validating}
+            className="rounded-md border border-amber-500 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+          >
+            {validating ? "Валидиране..." : "Валидирай стандарти"}
+          </button>
+        )}
+        {smrResults.length > 0 && (
+          <button
+            onClick={async () => {
+              await fetch("/api/clear-standards-cache", { method: "POST" });
+            }}
+            className="rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-50"
+            title="Изчисти кеша за стандарти — следващата валидация ще провери всичко наново"
+          >
+            Изчисти кеш
+          </button>
+        )}
       </div>
+
+      {validationSummary && (
+        <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <span className="font-medium text-amber-900">
+                Стандарти: {validationSummary.total} намерени
+              </span>
+              <span className="ml-3 text-green-700">{validationSummary.valid} валидни</span>
+              {validationSummary.withdrawn > 0 && (
+                <span className="ml-3 font-semibold text-red-700">
+                  {validationSummary.withdrawn} оттеглени
+                </span>
+              )}
+              {validationSummary.underReview > 0 && (
+                <span className="ml-3 text-amber-700">
+                  {validationSummary.underReview} в преразглеждане
+                </span>
+              )}
+              {validationSummary.replaced > 0 && (
+                <span className="ml-3 text-orange-700">
+                  {validationSummary.replaced} заменени
+                </span>
+              )}
+              {validationSummary.unknown > 0 && (
+                <span className="ml-3 text-neutral-500">
+                  {validationSummary.unknown} неизвестни
+                </span>
+              )}
+            </div>
+            {validationDetails && (
+              <button
+                onClick={() => setShowValidationDetails((v) => !v)}
+                className="text-xs text-amber-800 underline hover:no-underline"
+              >
+                {showValidationDetails ? "Скрий детайли" : "Виж всички стандарти"}
+              </button>
+            )}
+          </div>
+
+          {showValidationDetails && validationDetails && (
+            <ValidationDetailsTable results={validationDetails} />
+          )}
+        </div>
+      )}
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
       {warning && (
@@ -126,13 +416,7 @@ export function KssSmrSection({
         </p>
       )}
 
-      <textarea
-        readOnly
-        value={displayText}
-        placeholder="Текстовете за КСС ще се появят след генериране."
-        className="mt-3 h-64 w-full resize-y rounded-md border border-neutral-300 bg-neutral-50 px-3 py-2 text-sm text-neutral-800 placeholder-neutral-400"
-        style={{ textAlign: "justify" }}
-      />
+      <SmrResultsTable results={smrResults} />
     </section>
   );
 }

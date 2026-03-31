@@ -16,6 +16,7 @@ import mammoth from "mammoth";
 import { createHash } from "crypto";
 import { createLLM } from "./langchainClient";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
+import AdmZip from "adm-zip";
 
 export type OfferSectionType =
   | "introduction"
@@ -398,7 +399,16 @@ function extractSmrTechnologies(
     // not a fixed 4000-char window that could bleed into subsequent tables/text.
     const tableEnd = findTableEnd(smrHtml, pos);
     const preview = smrHtml.slice(pos, tableEnd);
-    const previewLower = preview.toLowerCase();
+    // Normalize Latin/Cyrillic homoglyphs (some DOCX files mix Latin "T", "c", "o"
+    // etc. with Cyrillic text, causing keyword detection to fail).
+    const previewLower = preview.toLowerCase()
+      .replace(/t/g, "т")  // Latin t → Cyrillic т
+      .replace(/c/g, "с")  // Latin c → Cyrillic с
+      .replace(/o/g, "о")  // Latin o → Cyrillic о
+      .replace(/a/g, "а")  // Latin a → Cyrillic а
+      .replace(/e/g, "е")  // Latin e → Cyrillic е
+      .replace(/p/g, "р")  // Latin p → Cyrillic р
+      .replace(/x/g, "х"); // Latin x → Cyrillic х
 
     // Count how many of the 4 SMR resource keywords appear in this table.
     // A genuine SMR header table contains multiple resource rows (Ангажирани
@@ -429,19 +439,106 @@ function extractSmrTechnologies(
 
   if (smrStarts.length === 0) return [];
 
+  // Detect the end boundary of the SMR block so we don't bleed KSS price tables,
+  // schedule tables (ГРАФИК) or ЗБУТ section headings into the last SMR entry.
+  //
+  // IMPORTANT: boundary detection must only scan content AFTER the last SMR table start,
+  // because "Изисквания към изпълнение", "График", "ЗБУТ" etc. also appear in the
+  // introductory sections of every document — scanning from position 0 would fire far
+  // too early and cut off all SMR entries.
+  const lastSmrStart = smrStarts[smrStarts.length - 1].index;
+  const postSmrHtml = smrHtml.slice(lastSmrStart);
+
+  // Section-heading patterns that signal the start of a new non-SMR document section.
+  // We require "мерки за збут" (not bare "збут") because "збут" / "ззбут" appears
+  // hundreds of times in the body of every Bulgarian construction offer.
+  const sectionBoundaryPattern =
+    /<(?:h[1-6]|p|strong)[^>]*>[^<]*(?:мерки\s+(?:за|по)\s+збут|график\s+за\s+изпълнение|количествено\s+стойностна\s+сметка|кол[.]?\s*стойностна)[^<]*<\/(?:h[1-6]|p|strong)>/gi;
+
+  // KSS price tables: tables containing both a price column header AND a total column.
+  // Only scan tables that appear after the last SMR table.
+  const kssBoundaryPositions: number[] = [];
+  const tableScanRe = /<table(?:\s[^>]*)?>/gi;
+  let tMatch: RegExpExecArray | null;
+  while ((tMatch = tableScanRe.exec(postSmrHtml)) !== null) {
+    const absPos = lastSmrStart + tMatch.index;
+    const tEnd = findTableEnd(postSmrHtml, tMatch.index);
+    const tHtml = postSmrHtml.slice(tMatch.index, tEnd);
+    const tLower = tHtml.toLowerCase();
+    if (
+      (tLower.includes("ед. цена") || tLower.includes("единична цена") || tLower.includes("ед.цена")) &&
+      (tLower.includes("обща стойност") || tLower.includes("стойност лв"))
+    ) {
+      kssBoundaryPositions.push(absPos);
+    }
+  }
+
+  // Find the earliest boundary position (relative to full smrHtml, must be > lastSmrStart)
+  let htmlBoundary = smrHtml.length;
+  let bMatch: RegExpExecArray | null;
+  while ((bMatch = sectionBoundaryPattern.exec(postSmrHtml)) !== null) {
+    const absPos = lastSmrStart + bMatch.index;
+    if (absPos > lastSmrStart && absPos < htmlBoundary) htmlBoundary = absPos;
+  }
+  for (const kssPos of kssBoundaryPositions) {
+    if (kssPos > lastSmrStart && kssPos < htmlBoundary) htmlBoundary = kssPos;
+  }
+
   // For each SMR table start, capture EVERYTHING until the next SMR table start
-  // This includes the table itself + all following paragraphs, images, sub-tables
+  // (or the section boundary for the last entry, whichever comes first).
   const result: { name: string; html: string; plainText: string }[] = [];
 
   for (let i = 0; i < smrStarts.length; i++) {
     const start = smrStarts[i].index;
-    const end = i + 1 < smrStarts.length ? smrStarts[i + 1].index : smrHtml.length;
+    const naturalEnd = i + 1 < smrStarts.length ? smrStarts[i + 1].index : smrHtml.length;
+    const end = Math.min(naturalEnd, htmlBoundary);
+    if (end <= start) continue;
     const html = smrHtml.slice(start, end).trim();
     const plainText = htmlToPlainText(html).trim();
 
     if (plainText.length < 20) continue;
 
     result.push({ name: smrStarts[i].name, html, plainText });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Post-process: extend SHORT entries with the shared description from their
+  // group.  Many Bulgarian offers list several resource tables in a row, then
+  // write one combined "Технология за изпълнение" section that covers all of
+  // them.  Without this step the first N-1 tables in such a group contain only
+  // the resource rows (~300-500 chars) while the last one gets ~70K chars of
+  // combined description.
+  //
+  // Algorithm: walk backwards — when a SHORT entry (plainText < threshold) is
+  // followed by a LONG entry, append the LONG entry's description text (the
+  // content after its resource table) to the SHORT entry.  This gives every
+  // position in the group its own copy of the shared description.
+  // ---------------------------------------------------------------------------
+  const SHORT_THRESHOLD = 1200; // chars of plain text — resource-only tables are ~300-600
+
+  for (let i = result.length - 2; i >= 0; i--) {
+    if (result[i].plainText.length >= SHORT_THRESHOLD) continue;
+
+    // Find the nearest following entry that has substantial content
+    let donor: (typeof result)[number] | null = null;
+    for (let j = i + 1; j < result.length; j++) {
+      if (result[j].plainText.length >= SHORT_THRESHOLD) {
+        donor = result[j];
+        break;
+      }
+    }
+    if (!donor) continue;
+
+    // Extract the description portion of the donor — everything AFTER its
+    // resource table (the first </table> in the donor HTML).
+    const donorTableClose = donor.html.indexOf("</table>");
+    if (donorTableClose < 0) continue;
+    const sharedDescription = donor.html.slice(donorTableClose + "</table>".length).trim();
+    if (sharedDescription.length < 200) continue;
+
+    // Append the shared description to the short entry
+    result[i].html = result[i].html + sharedDescription;
+    result[i].plainText = htmlToPlainText(result[i].html).trim();
   }
 
   return result;
@@ -458,14 +555,171 @@ function extractSmrTechnologies(
  * Images are extracted with content hashes and stored as OFFER_IMG:[hash.ext] placeholders.
  * The caller (offerStorage.ts) uploads the imageMap to Supabase Storage.
  */
+/**
+ * Replaces mc:AlternateContent blocks that require the "wpg" (WordprocessingGroup)
+ * namespace with a sentinel XML comment that carries the original block as a
+ * base64-encoded attribute.
+ *
+ * Why: Mammoth extracts text from every wps:txbx inside wpg drawing groups,
+ * producing disconnected "floating" labels (e.g. flowchart node captions).
+ * We want to preserve the drawing for the final DOCX export while preventing
+ * mammoth from turning its text-box labels into stray paragraphs.
+ *
+ * The sentinel becomes a <div data-docx-drawing="…base64…"></div> in the HTML
+ * output, which htmlToDocxBody.ts later replaces with an ImportedXmlComponent
+ * so the drawing appears verbatim in the generated Word file.
+ *
+ * Drawings with external rId references (r:embed / v:imagedata r:id) have their
+ * referenced media files extracted from the source ZIP and bundled as a JSON
+ * payload so the target DOCX can include them without broken relationships.
+ */
+
+/** Payload stored in the data-docx-drawing attribute for drawings with media. */
+export interface DrawingBundle {
+  v: 2;
+  xml: string; // mc:AlternateContent with remapped rIds
+  media: {
+    rId: string;        // new safe rId used inside xml (e.g. "rId9001")
+    filename: string;   // target path in word/media/ of the generated DOCX
+    data: string;       // base64-encoded binary content
+    contentType: string;
+  }[];
+}
+
+/** Parse <Relationship Id="…" Target="…"/> entries from a rels XML string. */
+function parseRelsMap(relsXml: string): Map<string, string> {
+  const map = new Map<string, string>();
+  // Match entire <Relationship … /> elements then extract Id and Target separately.
+  // A single regex like /Id="..."[^/]*Target="..."/ breaks because the Type="http://…"
+  // value contains slashes, causing [^/]* to stop mid-attribute.
+  const relRe = /<Relationship\b([^>]*\/?>)/g;
+  let m: RegExpExecArray | null;
+  while ((m = relRe.exec(relsXml)) !== null) {
+    const attrs = m[1];
+    const idMatch = attrs.match(/\bId="([^"]+)"/);
+    const targetMatch = attrs.match(/\bTarget="([^"]+)"/);
+    if (idMatch && targetMatch) map.set(idMatch[1], targetMatch[1]);
+  }
+  return map;
+}
+
+function extractWpgDrawings(docxBuffer: Buffer): {
+  buffer: Buffer;
+  drawings: Map<string, string>; // sentinel-id → raw XML (self-contained) or JSON DrawingBundle (with media)
+} {
+  const drawings = new Map<string, string>();
+  const zip = new AdmZip(docxBuffer);
+  const entry = zip.getEntry("word/document.xml");
+  if (!entry) return { buffer: docxBuffer, drawings };
+
+  const relsEntry = zip.getEntry("word/_rels/document.xml.rels");
+  const relsMap = relsEntry ? parseRelsMap(relsEntry.getData().toString("utf-8")) : new Map<string, string>();
+
+  let xml = entry.getData().toString("utf-8");
+
+  const OPEN = "<mc:AlternateContent";
+  const CLOSE = "</mc:AlternateContent>";
+  const WPG_MARKER = 'mc:Choice Requires="wpg"';
+  const WPS_MARKER = 'mc:Choice Requires="wps"';
+
+  const parts: string[] = [];
+  let i = 0;
+  let counter = 0;
+  let rIdSeed = 9001; // high base to avoid collision with docx.js-generated rIds
+
+  while (i < xml.length) {
+    const openPos = xml.indexOf(OPEN, i);
+    if (openPos === -1) {
+      parts.push(xml.slice(i));
+      break;
+    }
+    parts.push(xml.slice(i, openPos));
+
+    const closePos = xml.indexOf(CLOSE, openPos);
+    if (closePos === -1) {
+      parts.push(xml.slice(openPos));
+      break;
+    }
+
+    const block = xml.slice(openPos, closePos + CLOSE.length);
+
+    if (block.includes(WPG_MARKER) || block.includes(WPS_MARKER)) {
+      const id = `wpg_drawing_${counter++}`;
+
+      // Collect all external rId refs in this block
+      const embedRefs = [...block.matchAll(/r:embed="(rId\d+)"/g)].map((m) => m[1]);
+      const vmlRefs = [...block.matchAll(/<v:imagedata[^>]+r:id="(rId\d+)"/g)].map((m) => m[1]);
+      const externalRIds = [...new Set([...embedRefs, ...vmlRefs])];
+
+      if (externalRIds.length === 0) {
+        // Self-contained block — store raw XML (backward-compatible format)
+        drawings.set(id, block);
+      } else {
+        // Block has external media references — inline the media files
+        let patchedXml = block;
+        const mediaEntries: DrawingBundle["media"] = [];
+
+        for (const oldRId of externalRIds) {
+          const target = relsMap.get(oldRId); // e.g. "media/image72.png"
+          if (!target) continue;
+          const mediaEntry = zip.getEntry(`word/${target}`);
+          if (!mediaEntry) continue;
+
+          const newRId = `rId${rIdSeed++}`;
+          const origName = target.split("/").pop() ?? `img${mediaEntries.length}.bin`;
+          const filename = `wpg_${id}_${origName}`;
+          const ext = (origName.split(".").pop() ?? "png").toLowerCase();
+          const contentType =
+            ext === "jpg" || ext === "jpeg" ? "image/jpeg" :
+            ext === "emf" ? "image/x-emf" :
+            ext === "wmf" ? "image/x-wmf" :
+            `image/${ext}`;
+
+          mediaEntries.push({
+            rId: newRId,
+            filename,
+            data: mediaEntry.getData().toString("base64"),
+            contentType,
+          });
+
+          // Rewrite every occurrence of the old rId in the drawing XML
+          patchedXml = patchedXml.replace(new RegExp(`"${oldRId}"`, "g"), `"${newRId}"`);
+        }
+
+        const bundle: DrawingBundle = { v: 2, xml: patchedXml, media: mediaEntries };
+        drawings.set(id, JSON.stringify(bundle));
+      }
+
+      // Replace with a plain text sentinel paragraph.
+      // NOTE: This often creates a nested <w:p> because the original drawing
+      // is inside <w:r> within a parent <w:p>.  The sentinel replacement in
+      // parseOfferDocx() handles the resulting <p><p>SENTINEL</p></p> nesting.
+      parts.push(`<w:p><w:r><w:t>DOCX_DRAWING:${id}</w:t></w:r></w:p>`);
+    } else {
+      parts.push(block);
+    }
+
+    i = closePos + CLOSE.length;
+  }
+
+  xml = parts.join("");
+  zip.updateFile("word/document.xml", Buffer.from(xml, "utf-8"));
+  return { buffer: zip.toBuffer(), drawings };
+}
+
 export async function parseOfferDocx(
   buffer: Buffer
 ): Promise<{ sections: ParsedOfferSection[]; imageMap: OfferImageMap }> {
   const imageMap: OfferImageMap = new Map();
 
+  // Pre-process: replace DrawingML group canvases (wpg) with sentinel text so
+  // mammoth doesn't extract their shape text-box labels as stray paragraphs.
+  // The drawings map carries the original XML blocks for later DOCX injection.
+  const { buffer: cleanBuffer, drawings: wpgDrawings } = extractWpgDrawings(buffer);
+
   // Step 1: mammoth DOCX → HTML with images as hashed placeholders
   const { value: fullHtml } = await mammoth.convertToHtml(
-    { buffer },
+    { buffer: cleanBuffer },
     {
       convertImage: mammoth.images.imgElement(async (image) => {
         const data = Buffer.from(await image.read());
@@ -484,8 +738,38 @@ export async function parseOfferDocx(
     }
   );
 
+  // Step 1b: Replace sentinel paragraphs with <div data-docx-drawing="…base64…">
+  // so the drawing XML survives the pipeline and can be re-injected into the
+  // generated DOCX by htmlToDocxBody.ts.
+  //
+  // The original drawing lives inside <w:r> within <w:p>, so extractWpgDrawings()
+  // creates a nested <w:p> sentinel.  Mammoth renders this as nested <p> tags:
+  //   <p><p>DOCX_DRAWING:id</p></p>           — standalone
+  //   <p><p>DOCX_DRAWING:id</p>trailing</p>   — shared paragraph
+  // We must handle both to avoid the drawing div being trapped inside a <p>.
+  let processedHtml = fullHtml;
+  for (const [id, drawingXml] of wpgDrawings) {
+    const b64 = Buffer.from(drawingXml, "utf-8").toString("base64");
+    const drawingDiv = `<div data-docx-drawing="${b64}"></div>`;
+    // Standalone nested: <p><p>SENTINEL</p></p>
+    processedHtml = processedHtml.replace(
+      new RegExp(`<p><p>DOCX_DRAWING:${id}</p></p>`, "g"),
+      drawingDiv
+    );
+    // Nested with trailing content: <p><p>SENTINEL</p>…</p> → drawing + new <p>
+    processedHtml = processedHtml.replace(
+      new RegExp(`<p><p>DOCX_DRAWING:${id}</p>`, "g"),
+      `${drawingDiv}<p>`
+    );
+    // Fallback: simple <p>SENTINEL</p> (when not nested)
+    processedHtml = processedHtml.replace(
+      new RegExp(`<p>DOCX_DRAWING:${id}</p>`, "g"),
+      drawingDiv
+    );
+  }
+
   // Step 2: Extract full plain text
-  const fullPlainText = htmlToPlainText(fullHtml);
+  const fullPlainText = htmlToPlainText(processedHtml);
   if (fullPlainText.length < 100) {
     throw new Error("Документът е твърде кратък или не може да бъде прочетен.");
   }
@@ -495,7 +779,7 @@ export async function parseOfferDocx(
   const aiSections = await identifySectionsWithAi(fullPlainText, headingCandidates);
 
   // Step 4: Split HTML using text search (accurate for table-heavy documents)
-  const highLevelSections = splitHtmlBySections(fullHtml, aiSections);
+  const highLevelSections = splitHtmlBySections(processedHtml, aiSections);
 
   // Step 5: Trim introduction — cut before "В изпълнение на задълженията"
   // (standard contract obligations block A.1–A.17, Б, В, НОРМАТИВИ that must not
@@ -518,22 +802,42 @@ export async function parseOfferDocx(
   let orderIndex = 0;
 
   // First, try extracting SMR technologies from the AI-identified section
-  let smrTechnologiesFound: { name: string; html: string; plainText: string }[] = [];
+  let smrFromAiSection: { name: string; html: string; plainText: string }[] = [];
 
   for (const section of highLevelSections) {
     if (section.section_type === "smr_technology") {
-      smrTechnologiesFound = extractSmrTechnologies(section.html_content);
+      smrFromAiSection = extractSmrTechnologies(section.html_content);
       break;
     }
   }
 
-  // If the AI-identified section yielded no individual SMR tables (either because
-  // the AI didn't find an smr_technology section, or because the section boundaries
-  // were wrong), fall back to scanning the FULL HTML for SMR tables.
-  // This handles documents with diverse structures: "Работна програма",
-  // "Предложение за цялостния подход", incorrectly bounded sections, etc.
-  if (smrTechnologiesFound.length === 0) {
-    smrTechnologiesFound = extractSmrTechnologies(fullHtml);
+  // ALWAYS also scan the full HTML — AI section boundaries can be wrong, cutting
+  // off SMR tables that appear before or after the identified section.
+  // Merge results by normalized title, preferring the AI-section version (it has
+  // tighter boundaries and avoids KSS table bleed).
+  const smrFromFullHtml = extractSmrTechnologies(processedHtml);
+
+  const normalizeSmrName = (s: string) =>
+    s.toLowerCase().replace(/[.,;:!?–—\-()]/g, " ").replace(/\s+/g, " ").trim();
+
+  const seenNames = new Set<string>();
+  const smrTechnologiesFound: { name: string; html: string; plainText: string }[] = [];
+
+  // Add AI-section results first (preferred — tighter boundaries)
+  for (const t of smrFromAiSection) {
+    const norm = normalizeSmrName(t.name);
+    if (!seenNames.has(norm)) {
+      seenNames.add(norm);
+      smrTechnologiesFound.push(t);
+    }
+  }
+  // Then add any full-HTML results that the AI section missed
+  for (const t of smrFromFullHtml) {
+    const norm = normalizeSmrName(t.name);
+    if (!seenNames.has(norm)) {
+      seenNames.add(norm);
+      smrTechnologiesFound.push(t);
+    }
   }
 
   // Build final sections: non-SMR sections from AI + individual SMR technologies
@@ -561,7 +865,7 @@ export async function parseOfferDocx(
     finalSections.push({
       section_type: "other",
       title: "Цялото съдържание",
-      html_content: fullHtml.slice(0, 1_000_000),
+      html_content: processedHtml.slice(0, 1_000_000),
       plain_text: fullPlainText.slice(0, 500_000),
       order_index: 0,
     });

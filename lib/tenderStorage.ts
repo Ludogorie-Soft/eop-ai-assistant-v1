@@ -25,6 +25,7 @@ export interface TenderRow {
   name: string;
   introduction_text: string;
   team_organization_text: string;
+  communication_text: string;
   raw_text: string;
   smr_results: unknown[];
   created_at: string;
@@ -98,7 +99,7 @@ export async function updateTender(
   fields: Partial<
     Pick<
       TenderRow,
-      "name" | "introduction_text" | "team_organization_text" | "raw_text" | "smr_results"
+      "name" | "introduction_text" | "team_organization_text" | "communication_text" | "raw_text" | "smr_results"
     >
   >,
 ): Promise<TenderRow> {

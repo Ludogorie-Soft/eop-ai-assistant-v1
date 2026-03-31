@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
     const { sourceText, kssNames } = body as { sourceText?: string; kssNames?: string[] };
     if (!sourceText || typeof sourceText !== 'string') {
       return NextResponse.json(
-        { error: 'Source text is required' },
+        { error: 'Изходният текст е задължителен' },
         { status: 400 }
       );
     }
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ teamOrganization });
   } catch (err) {
     const message =
-      err instanceof Error ? err.message : 'Failed to generate team organization';
+      err instanceof Error ? err.message : 'Грешка при генериране на организацията на екипа';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

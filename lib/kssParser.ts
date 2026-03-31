@@ -75,13 +75,17 @@ function isCategoryRow(code: string, name: string): boolean {
   if (/^Сметка\s*\d+/i.test(combined)) return true;
   // Roman numeral section headers (e.g. "І.", "IІ.", "IIІ.", "IV.")
   if (ROMAN_NUMERAL_CODE.test(code.trim())) return true;
-  // Section label in code column with empty name — e.g. "УЛИЧНО ПЛАТНО", "ТРОТОАРИ", "ОБЩА ПЛОЩ: 5818 m2".
+  // Section label in code column with empty name — e.g. "УЛИЧНО ПЛАТНО", "ТРОТОАРИ", "ПАРКИНГ", "ОТВОДНЯВАНЕ", "ОБЩА ПЛОЩ: 5818 m2".
   // These are road-section descriptors or measurement metadata, not work items.
   // Detected by: code contains 3+ consecutive Cyrillic uppercase letters AND name is empty.
   if (code.trim() && !name.trim() && /[А-Я]{3,}/u.test(code.trim())) return true;
-  // Same pattern in name column with empty code
+  // Same pattern in name column with empty code (all-uppercase variant)
   if (!code.trim() && name.trim() && /[А-Я]{3,}/u.test(name.trim()) &&
       name.trim() === name.trim().toUpperCase()) return true;
+  // Known road-section names in mixed-case (e.g. "Паркинг", "Отводняване", "Тротоари", "Улично платно")
+  // These may appear with a non-empty code (e.g. "2.", "А.") so the checks above miss them.
+  const ROAD_SECTION_NAMES = /^(улично\s+платно|тротоари|паркинг|отводняване)$/i;
+  if (ROAD_SECTION_NAMES.test(code.trim()) || ROAD_SECTION_NAMES.test(name.trim())) return true;
   // Metadata patterns (area/length totals) that appear anywhere in code or name
   if (/^обща\s+(площ|дължина)/i.test(code.trim()) ||
       /^обща\s+(площ|дължина)/i.test(name.trim())) return true;
@@ -188,8 +192,10 @@ export function parseKssExcel(buffer: Buffer): ParseKssResult {
     const quantity = safeNumber(row[q]);
 
     if (!name && !code) continue;
-    // Stop at the totals section — everything below (pricing elements, etc.) is not a work item
-    if (isSummaryRow(code)) break;
+    // Skip totals/summary rows (ДДС, Обща сума, etc.) — they appear between sections too,
+    // so we continue instead of break to handle multi-section KSS files
+    // (Улично платно + Тротоари + Паркинг + Отводняване, etc.).
+    if (isSummaryRow(code)) continue;
     if (isCategoryRow(code, name)) continue;
     if (isDataHeaderRow(name, code)) continue;
     items.push({

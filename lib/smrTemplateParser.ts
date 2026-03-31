@@ -50,7 +50,7 @@ function isTitleTable(tableHtml: string): boolean {
   if (!title || title.length < 3) return false;
 
   // Guard against accidentally matching long body-content tables
-  if (title.length > 220) return false;
+  if (title.length > 500) return false;
 
   // Skip ALL-CAPS section headers (e.g. "ПОДГОТВИТЕЛНИ И ЗЕМНИ РАБОТИ")
   const stripped = title.replace(/[\s\d.,;:()\-–—\/]/g, "");
@@ -84,7 +84,10 @@ function extractTopLevelTables(
       depth++;
     } else {
       depth--;
-      if (depth === 0) {
+      if (depth < 0) {
+        // Stray closing tag with no matching opener — reset to safe state
+        depth = 0;
+      } else if (depth === 0) {
         const end = match.index + match[0].length;
         results.push({ index: start, length: end - start, tableHtml: html.slice(start, end) });
       }

@@ -99,13 +99,13 @@ export function TenderListPage() {
   return (
     <div className="min-h-screen bg-neutral-100 text-neutral-900">
       <header className="border-b border-neutral-200 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-6">
+        <div className="mx-auto flex max-w-[75%] items-center justify-between px-4 py-6">
           <div>
             <h1 className="text-xl font-semibold text-neutral-800">
               Tender Technical Generator
             </h1>
             <p className="mt-1 text-sm text-neutral-600">
-              v1 – Увод, КСС, AI генериране, DOCX експорт
+              v1 – Увод, КСС, Организация на Екип, AI генериране, DOCX експорт
             </p>
           </div>
           <Link
@@ -117,7 +117,7 @@ export function TenderListPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl space-y-6 px-4 py-8">
+      <main className="mx-auto max-w-[75%] space-y-6 px-6 lg:px-12 py-8">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-neutral-800">
             Обществени поръчки
@@ -167,18 +167,8 @@ export function TenderListPage() {
                     <span className="text-sm font-medium text-neutral-800 group-hover:text-neutral-600">
                       {t.name || "Без име"}
                     </span>
-                    <div className="mt-0.5 flex items-center gap-3 text-xs text-neutral-500">
+                    <div className="mt-0.5 text-xs text-neutral-500">
                       <span>{formatDate(t.updatedAt)}</span>
-                      {t.hasIntroduction && (
-                        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-blue-700">
-                          Увод
-                        </span>
-                      )}
-                      {t.smrCount > 0 && (
-                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">
-                          {t.smrCount} КСС
-                        </span>
-                      )}
                     </div>
                   </Link>
                   <button

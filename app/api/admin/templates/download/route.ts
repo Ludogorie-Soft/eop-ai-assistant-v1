@@ -21,6 +21,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    if (path.includes('..') || path.startsWith('/')) {
+      return NextResponse.json(
+        { error: 'Невалиден път.' },
+        { status: 400 }
+      );
+    }
+
     const buffer = await downloadTemplate(path);
 
     const filename = path.replace(/^\d{4}-\d{2}-\d{2}_/, '');

@@ -88,6 +88,13 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
+    if (path.includes('..') || path.startsWith('/')) {
+      return NextResponse.json(
+        { error: 'Невалиден път.' },
+        { status: 400 }
+      );
+    }
+
     await deleteTemplate(path);
     return NextResponse.json({ success: true });
   } catch (err) {

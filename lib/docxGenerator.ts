@@ -15,9 +15,11 @@ import {
   LineRuleType,
   BorderStyle,
   Table,
+  ImportedXmlComponent,
 } from "docx";
-import { htmlToDocxElements } from "./htmlToDocxBody";
+import { htmlToDocxElements, type DrawingMediaEntry } from "./htmlToDocxBody";
 import { resolveHtmlImages } from "./offerStorage";
+import AdmZip from "adm-zip";
 
 const FONT = "Times New Roman";
 const FONT_SIZE = 22; // 11pt in half-points
@@ -111,6 +113,123 @@ export type SmrResultForDocx = {
   htmlBody?: string;
 };
 
+/**
+ * Strip content from an SMR template htmlBody that does NOT belong to the SMR description —
+ * e.g. KSS price tables, schedule tables (ГРАФИК), or ЗБУТ sections that bled in from the
+ * surrounding offer document when the template was extracted.
+ *
+ * Detection strategy:
+ *  1. Find the first heading/paragraph that matches known non-SMR section markers.
+ *  2. Find the first table whose header row contains KSS price columns (ед. цена / обща стойност).
+ *  3. Truncate the html at the earliest such position.
+ */
+function stripNonSmrTrailingContent(html: string): string {
+  const lower = html.toLowerCase();
+
+  // Section-heading patterns that signal a non-SMR section boundary.
+  // Keep only very distinctive headings — "мерки за збут" (NOT bare "збут"),
+  // "график за изпълнение", and the full KSS table title.
+  // Avoid patterns like "изисквания към изпълнение" that also appear inside SMR descriptions.
+  const NON_SMR_HEADINGS =
+    /(?:мерки\s+(?:за|по)\s+збут|график\s+за\s+изпълнение|количествено\s+стойностна\s+сметка)/i;
+
+  let boundary = html.length;
+
+  // Search in paragraph/heading tags for the marker text
+  const tagRe = /<(?:h[1-6]|p|strong)\b[^>]*>([\s\S]*?)<\/(?:h[1-6]|p|strong)>/gi;
+  let tagMatch: RegExpExecArray | null;
+  while ((tagMatch = tagRe.exec(html)) !== null) {
+    const text = tagMatch[1].replace(/<[^>]+>/g, "");
+    if (NON_SMR_HEADINGS.test(text) && tagMatch.index < boundary) {
+      boundary = tagMatch.index;
+      break;
+    }
+  }
+
+  // Search for KSS price tables: tables whose first ~2000 chars contain price column headers
+  const tableRe = /<table(?:\s[^>]*)?>/gi;
+  let tableMatch: RegExpExecArray | null;
+  while ((tableMatch = tableRe.exec(html)) !== null) {
+    if (tableMatch.index >= boundary) break;
+    const preview = lower.slice(tableMatch.index, tableMatch.index + 2000);
+    if (
+      (preview.includes("ед. цена") || preview.includes("единична цена") || preview.includes("ед.цена")) &&
+      (preview.includes("обща стойност") || preview.includes("стойност лв"))
+    ) {
+      if (tableMatch.index < boundary) {
+        boundary = tableMatch.index;
+        break;
+      }
+    }
+  }
+
+  return boundary < html.length ? html.slice(0, boundary).trim() : html;
+}
+
+/**
+ * Post-process a docx.js Packer-generated buffer to inject drawing media files
+ * and their relationship entries.  Required when WPG/WPS drawings reference
+ * images (r:embed / v:imagedata r:id) that were extracted from the source DOCX.
+ */
+function injectDrawingMedia(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  docxBuffer: Buffer | any,
+  mediaFiles: Map<string, DrawingMediaEntry>,
+): Buffer {
+  const zip = new AdmZip(docxBuffer);
+
+  // Read existing rels (docx.js always produces this file)
+  const RELS_PATH = "word/_rels/document.xml.rels";
+  const relsEntry = zip.getEntry(RELS_PATH);
+  let relsXml = relsEntry
+    ? relsEntry.getData().toString("utf-8")
+    : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      "</Relationships>";
+
+  const IMAGE_TYPE =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+
+  // Track which file extensions need a new Default entry in [Content_Types].xml
+  const newExtensions = new Set<string>();
+
+  for (const [rId, { filename, data, contentType }] of mediaFiles) {
+    // Add the media binary
+    zip.addFile(`word/media/${filename}`, data);
+    // Append relationship entry before the closing tag
+    const rel = `<Relationship Id="${rId}" Type="${IMAGE_TYPE}" Target="media/${filename}"/>`;
+    relsXml = relsXml.replace("</Relationships>", rel + "</Relationships>");
+    // Track extension for content-type registration
+    const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+    if (ext) newExtensions.add(ext + "|" + contentType);
+    console.log(`[docxGenerator] injected media ${filename} as ${rId} (${contentType})`);
+  }
+
+  if (relsEntry) {
+    zip.updateFile(RELS_PATH, Buffer.from(relsXml, "utf-8"));
+  } else {
+    zip.addFile(RELS_PATH, Buffer.from(relsXml, "utf-8"));
+  }
+
+  // Ensure [Content_Types].xml has a Default entry for each new extension.
+  // Without this Word reports "unreadable content" even if the rels are correct.
+  const CT_PATH = "[Content_Types].xml";
+  const ctEntry = zip.getEntry(CT_PATH);
+  if (ctEntry && newExtensions.size > 0) {
+    let ctXml = ctEntry.getData().toString("utf-8");
+    for (const extType of newExtensions) {
+      const [ext, mime] = extType.split("|");
+      // Only add if a Default for this extension isn't already present
+      if (!ctXml.includes(`Extension="${ext}"`)) {
+        const entry = `<Default Extension="${ext}" ContentType="${mime}"/>`;
+        ctXml = ctXml.replace("</Types>", entry + "</Types>");
+      }
+    }
+    zip.updateFile(CT_PATH, Buffer.from(ctXml, "utf-8"));
+  }
+
+  return zip.toBuffer();
+}
 
 export async function generateTenderDocx(
   introductionText: string | undefined,
@@ -118,10 +237,16 @@ export async function generateTenderDocx(
   smrResults?: SmrResultForDocx[],
   satelliteImage?: { data: Buffer; width: number; height: number },
   teamOrganizationText?: string,
+  communicationText?: string,
 ): Promise<{ buffer: Buffer; filename: string }> {
-  const paragraphs: (Paragraph | Table)[] = [];
+  const paragraphs: (Paragraph | Table | ImportedXmlComponent)[] = [];
+  // Collects media files from drawings that reference external images (e.g. wpg blocks
+  // with a:blip or v:imagedata).  Populated as a side-effect of htmlToDocxElements();
+  // injected into the ZIP after Packer.toBuffer() via injectDrawingMedia().
+  const docxMediaFiles = new Map<string, DrawingMediaEntry>();
   const hasIntroduction = Boolean(introductionText?.trim());
   const hasTeamOrg = Boolean(teamOrganizationText?.trim());
+  const hasCommunication = Boolean(communicationText?.trim());
   const hasSmr = Boolean(smrResults?.length);
 
   if (hasIntroduction) {
@@ -163,6 +288,7 @@ export async function generateTenderDocx(
     }
 
     const blocks = (introductionText ?? "")
+      .replace(/\n?\[извлечено от [^\]]+\]/g, "")
       .split(/\n\n+/)
       .map((s) => s.trim().replace(/\*\*([^*]+)\*\*/g, "$1"))
       .filter((b) => {
@@ -260,11 +386,32 @@ export async function generateTenderDocx(
       if (r.htmlBody) {
         // Use rich HTML body: preserves bold, italic, bullet lists, images, and tables from the SMR template.
         // Tables are rendered 1:1 as DOCX Table objects (matching the original template structure).
-        const resolvedHtml = r.htmlBody.includes("/api/admin/offer-images/")
-          ? await resolveHtmlImages(r.htmlBody).catch(() => r.htmlBody!)
-          : r.htmlBody;
-        const richElements = htmlToDocxElements(resolvedHtml);
-        paragraphs.push(...richElements);
+        try {
+          // Normalise any unresolved OFFER_IMG: placeholders left from a
+          // failed image upload so resolveHtmlImages can still download them.
+          let htmlForResolve = r.htmlBody.includes("OFFER_IMG:")
+            ? r.htmlBody.replace(/OFFER_IMG:([^"'\s]+)/g, "/api/admin/offer-images/$1")
+            : r.htmlBody;
+          let resolvedHtml = htmlForResolve.includes("/api/admin/offer-images/")
+            ? await resolveHtmlImages(htmlForResolve).catch(() => htmlForResolve)
+            : htmlForResolve;
+          // Strip any content that bled in from a different project's KSS/schedule/ЗБУТ sections.
+          // These appear as heading-like paragraphs containing well-known section markers.
+          resolvedHtml = stripNonSmrTrailingContent(resolvedHtml);
+          const richElements = htmlToDocxElements(resolvedHtml, docxMediaFiles);
+          paragraphs.push(...richElements);
+        } catch (htmlErr) {
+          console.warn(`[docxGenerator] HTML→DOCX failed for ${r.kssCode}, plain text fallback:`, htmlErr);
+          paragraphs.push(
+            new Paragraph({
+              children: [
+                new TextRun({ text: r.text || "[грешка при конвертиране]", font: FONT, size: FONT_SIZE }),
+              ],
+              alignment: AlignmentType.BOTH,
+              spacing: { ...defaultSpacing, before: 0 },
+            }),
+          );
+        }
       } else {
         // No matching SMR template found — show only a text note, no table
         paragraphs.push(
@@ -398,16 +545,65 @@ export async function generateTenderDocx(
     }
   }
 
+  if (hasCommunication && communicationText) {
+    const sectionNum =
+      1 +
+      (hasIntroduction ? 1 : 0) +
+      (hasSmr ? 1 : 0) +
+      (hasTeamOrg ? 1 : 0);
+    paragraphs.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: `${sectionNum}. Ред и начин за осъществяване на комуникация, координация и съгласуване на дейностите между участниците в строителния процес (Възложител, строителен надзор, авторски надзор, изпълнител), включително`,
+            font: FONT,
+            size: FONT_SIZE,
+            bold: true,
+          }),
+        ],
+        heading: HeadingLevel.HEADING_1,
+        alignment: AlignmentType.LEFT,
+        spacing: {
+          ...defaultSpacing,
+          before: hasIntroduction || hasSmr || hasTeamOrg ? 400 : 0,
+          after: 400,
+        },
+      }),
+    );
+
+    try {
+      const commElements = htmlToDocxElements(communicationText, docxMediaFiles);
+      paragraphs.push(...commElements);
+    } catch (err) {
+      console.warn('[docxGenerator] Communication HTML→DOCX failed, plain text fallback:', err);
+      const plain = communicationText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      paragraphs.push(
+        new Paragraph({
+          children: [new TextRun({ text: plain, font: FONT, size: FONT_SIZE })],
+          alignment: AlignmentType.BOTH,
+          spacing: defaultSpacing,
+        }),
+      );
+    }
+  }
+
   const doc = new Document({
     sections: [
       {
         properties: {},
-        children: paragraphs,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        children: paragraphs as any,
       },
     ],
   });
 
-  const buffer = Buffer.from(await Packer.toBuffer(doc));
+  let buffer: Buffer = Buffer.from(await Packer.toBuffer(doc));
+
+  // If any drawings bundled external media, inject them into the DOCX ZIP now.
+  if (docxMediaFiles.size > 0) {
+    buffer = injectDrawingMedia(buffer, docxMediaFiles);
+  }
+
   const orderNumber = rawText ? extractOrderNumber(rawText) : null;
   let filename: string;
   if (orderNumber) {

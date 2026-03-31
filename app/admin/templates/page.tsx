@@ -451,6 +451,7 @@ function OfferUploadsSection() {
   const [offers, setOffers] = useState<OfferInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [reparsingId, setReparsingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -507,6 +508,27 @@ function OfferUploadsSection() {
       setError(err instanceof Error ? err.message : "Грешка при качване");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleReparse = async (id: string, name: string) => {
+    setReparsingId(id);
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      const res = await fetch("/api/admin/offers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const data = (await res.json()) as { error?: string; sectionCount?: number };
+      if (!res.ok) throw new Error(data.error ?? "Reparse failed");
+      setSuccessMsg(`"${name}" е преработена. Намерени ${data.sectionCount ?? 0} секции.`);
+      await fetchOffers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Грешка при преработване");
+    } finally {
+      setReparsingId(null);
     }
   };
 
@@ -616,6 +638,20 @@ function OfferUploadsSection() {
                   >
                     Преглед
                   </button>
+                  <a
+                    href={`/api/admin/offers/${offer.id}/download`}
+                    download={offer.filename}
+                    className="rounded-md border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:bg-neutral-50"
+                  >
+                    Свали
+                  </a>
+                  <button
+                    onClick={() => handleReparse(offer.id, offer.filename)}
+                    disabled={reparsingId === offer.id}
+                    className="rounded-md border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                  >
+                    {reparsingId === offer.id ? "Преработва..." : "Преработи"}
+                  </button>
                   <button
                     onClick={() => handleDelete(offer.id, offer.filename)}
                     className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
@@ -663,7 +699,7 @@ export default function AdminTemplatesPage() {
   return (
     <div className="min-h-screen bg-neutral-100 text-neutral-900">
       <header className="border-b border-neutral-200 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-4xl items-start justify-between gap-4 px-4 py-5">
+        <div className="mx-auto flex max-w-[75%] items-start justify-between gap-4 px-4 py-5">
           <div className="min-w-0 flex-1">
             <h1 className="text-xl font-semibold text-neutral-800">
               Администрация
@@ -681,7 +717,7 @@ export default function AdminTemplatesPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl space-y-6 px-4 py-8">
+      <main className="mx-auto max-w-[75%] space-y-6 px-6 lg:px-12 py-8">
         {!authorized ? (
           <section className="mx-auto max-w-md rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-neutral-800">

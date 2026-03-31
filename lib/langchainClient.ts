@@ -13,6 +13,7 @@ export function createLLM(options?: {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  seed?: number;
 }): ChatOpenAI {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -24,5 +25,6 @@ export function createLLM(options?: {
     modelName: options?.model ?? DEFAULT_MODEL,
     temperature: options?.temperature ?? DEFAULT_TEMPERATURE,
     maxTokens: options?.maxTokens ?? DEFAULT_MAX_TOKENS,
+    ...(options?.seed != null && { modelKwargs: { seed: options.seed } }),
   });
 }

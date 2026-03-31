@@ -1,0 +1,15 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - '--build-arg'
+      - 'NEXT_PUBLIC_TEMPLATES_PIN=${_NEXT_PUBLIC_TEMPLATES_PIN}'
+      - '-t'
+      - 'europe-west1-docker.pkg.dev/eop-ai-assistant/eop-ai-assistant/app:latest'
+      - '.'
+
+images:
+  - 'europe-west1-docker.pkg.dev/eop-ai-assistant/eop-ai-assistant/app:latest'
+
+substitutions:
+  _NEXT_PUBLIC_TEMPLATES_PIN: ''

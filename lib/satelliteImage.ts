@@ -11,20 +11,24 @@ const IMAGE_HEIGHT = 500;
 /** All kinds of quotation marks used in Bulgarian documents */
 const Q = `[„""«»"\u201C\u201D\u201E\u00AB\u00BB]`;
 
+/** Common Bulgarian words that are NOT city names (pronouns, conjunctions, etc.) */
+const NOT_CITY =
+  /^(тази|този|тези|това|тук|там|която|който|които|което|всяка|всеки|някои|няма|една|едно|един|всички|други|друг|друга|нова|нови|нов|ново|стара|стари|стар|старо|голяма|малка|горна|долна|северна|южна|западна|източна|цяла|цяло|бъдещ|бъдеща|бъдещо|която|когато|обект|обекта|район|района|дейност|дейности|площ|площта|сграда|сградата|строеж|строежа)$/i;
+
 /**
  * Extract city name from text: "гр. Правец", "град Правец", "община Правец"
  */
 function extractCity(text: string): string | null {
-  const m = text.match(/гр(?:ад)?\.?\s+([А-Яа-я]{2,25})/i);
-  if (m) return m[1].trim();
-  const m2 = text.match(/община\s+([А-Яа-я]{2,25})/i);
-  if (m2) return m2[1].trim();
-  // с. (село / village)
-  const m3 = text.match(/с\.\s+([А-Яа-я]{2,25})/i);
-  if (m3) return m3[1].trim();
-  // общ. (общини)
-  const m4 = text.match(/общ(?:ина)?\.?\s+([А-Яа-я]{2,25})/i);
-  if (m4) return m4[1].trim();
+  const patterns: RegExp[] = [
+    /гр(?:ада?)?\.?\s+([А-Я][а-я]{1,24})/,
+    /община\s+([А-Я][а-я]{1,24})/,
+    /с\.\s+([А-Я][а-я]{1,24})/,
+    /общ(?:ина)?\.?\s+([А-Я][а-я]{1,24})/,
+  ];
+  for (const pat of patterns) {
+    const m = text.match(pat);
+    if (m && !NOT_CITY.test(m[1])) return m[1].trim();
+  }
   return null;
 }
 

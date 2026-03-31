@@ -1,6 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { EditorContent } from '@tiptap/react';
+import { useRichEditor } from '../hooks/useRichEditor';
+import { EditorToolbar } from './EditorToolbar';
 import type { SmrResult } from './KssSmrSection';
 
 interface TeamOrganizationProps {
@@ -18,12 +21,18 @@ export function TeamOrganization({
 }: TeamOrganizationProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isAiGenerated, setIsAiGenerated] = useState(false);
+
+  const editor = useRichEditor({
+    value: teamOrganizationText,
+    onChange: onTeamOrganizationUpdate,
+    placeholder: 'Текстът за организация на екипа ще се появи след AI генериране или може да го въведете ръчно.',
+    height: '16rem',
+    aiHighlight: isAiGenerated,
+  });
 
   const handleGenerate = async () => {
-    if (!rawText.trim()) {
-      setError('Първо заредете данни от CAIS или качете файлове.');
-      return;
-    }
+    if (!rawText.trim()) { setError('Първо качете файлове.'); return; }
     setLoading(true);
     setError(null);
     try {
@@ -37,27 +46,27 @@ export function TeamOrganization({
       });
       const text = await res.text();
       let data: { teamOrganization?: string; error?: string } = {};
-      if (text) {
-        try {
-          data = JSON.parse(text) as { teamOrganization?: string; error?: string };
-        } catch {
-          data = {};
-        }
-      }
+      if (text) { try { data = JSON.parse(text); } catch { data = {}; } }
       if (!res.ok) throw new Error(data.error ?? 'Failed to generate');
       onTeamOrganizationUpdate(data.teamOrganization ?? '');
+      setIsAiGenerated(true);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Грешка при генериране на организация на екипа'
-      );
+      setError(err instanceof Error ? err.message : 'Грешка при генериране на организация на екипа');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-      <h2 className="text-lg font-semibold text-neutral-800">Организация на екипа</h2>
+    <section className="border-b border-neutral-100 py-10">
+      <div className="flex items-center gap-2">
+        <h2 className="text-xl font-semibold text-neutral-900">Организация на екипа</h2>
+        {isAiGenerated && (
+          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
+            AI генериран
+          </span>
+        )}
+      </div>
       <p className="mt-1 text-sm text-neutral-600">
         Редактируем текст. Натиснете бутона за автоматично генериране от шаблон и документация.
       </p>
@@ -71,14 +80,10 @@ export function TeamOrganization({
         </button>
       </div>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-      <textarea
-        value={teamOrganizationText}
-        onChange={(e) => onTeamOrganizationUpdate(e.target.value)}
-        placeholder="Текстът за организация на екипа ще се появи след AI генериране или може да го въведете ръчно."
-        className="mt-3 h-64 w-full resize-y rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-800 placeholder-neutral-400 focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500"
-        style={{ textAlign: 'justify' }}
-      />
+      <div className={`mt-3 overflow-hidden rounded-md border focus-within:ring-1 ${isAiGenerated ? 'border-yellow-300 ring-2 ring-yellow-200 focus-within:border-yellow-400 focus-within:ring-yellow-300' : 'border-neutral-300 focus-within:border-neutral-500 focus-within:ring-neutral-500'}`}>
+        {editor && <EditorToolbar editor={editor} />}
+        <EditorContent editor={editor} />
+      </div>
     </section>
   );
 }
-

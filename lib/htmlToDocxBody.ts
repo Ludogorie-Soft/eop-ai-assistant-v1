@@ -17,7 +17,16 @@ import {
   TableCell,
   WidthType,
   BorderStyle,
+  ImportedXmlComponent,
 } from "docx";
+import type { DrawingBundle } from "./offerParser";
+
+/** Media file to be injected into the generated DOCX ZIP after Packer.toBuffer(). */
+export interface DrawingMediaEntry {
+  filename: string;    // target path under word/media/ in the generated DOCX
+  data: Buffer;        // binary content
+  contentType: string; // MIME type
+}
 
 const FONT = "Times New Roman";
 const FONT_SIZE = 22; // 11pt in half-points
@@ -61,11 +70,12 @@ function parseInline(html: string): TextRun[] {
 
   let bold = false;
   let italic = false;
+  let highlight: "yellow" | undefined;
 
   // Tokenize: known formatting tags | any other HTML tag (skipped) | plain text.
   // The <[^>]*> catch-all is critical: without it, unknown tags like </ul> cause the
   // engine to advance past '<' and match 'ul>' as literal text.
-  const tokenRegex = /<(\/?)(?:strong|em|b|i|br)[^>]*>|<[^>]*>|[^<]+/gi;
+  const tokenRegex = /<(\/?)(?:strong|em|b|i|br|mark)[^>]*>|<[^>]*>|[^<]+/gi;
   let match: RegExpExecArray | null;
 
   while ((match = tokenRegex.exec(clean)) !== null) {
@@ -81,6 +91,8 @@ function parseInline(html: string): TextRun[] {
         bold = !closing;
       } else if (tagName === "em" || tagName === "i") {
         italic = !closing;
+      } else if (tagName === "mark") {
+        highlight = closing ? undefined : "yellow";
       }
     } else {
       const text = decodeEntities(token);
@@ -92,6 +104,7 @@ function parseInline(html: string): TextRun[] {
             size: FONT_SIZE,
             bold,
             italics: italic,
+            ...(highlight ? { highlight } : {}),
           }),
         );
       }
@@ -312,18 +325,36 @@ function mergeImageOnlyParagraphs(html: string): string {
 }
 
 /**
- * Parse a data URI src into typed buffer, or null if unsupported/malformed.
+ * Extract src attribute value from an <img> tag using indexOf (safe for huge base64 strings).
  */
-function parseDataUri(
+function extractSrcAttribute(imgHtml: string): string | null {
+  const lower = imgHtml.toLowerCase();
+  const idx = lower.indexOf("src=");
+  if (idx === -1) return null;
+  const quoteChar = imgHtml[idx + 4];
+  if (quoteChar !== '"' && quoteChar !== "'") return null;
+  const start = idx + 5;
+  const end = imgHtml.indexOf(quoteChar, start);
+  if (end === -1) return null;
+  return imgHtml.slice(start, end);
+}
+
+/**
+ * Parse a data URI without regex (safe for huge base64 strings).
+ */
+function parseDataUriIterative(
   src: string,
 ): { type: "png" | "jpg" | "gif"; data: Buffer } | null {
-  const m = src.match(/^data:image\/(png|jpeg|jpg|gif);base64,(.+)$/i);
-  if (!m) return null;
-  const ext = m[1].toLowerCase();
+  const prefix = "data:image/";
+  if (!src.startsWith(prefix)) return null;
+  const semiIdx = src.indexOf(";base64,");
+  if (semiIdx === -1 || semiIdx > prefix.length + 10) return null;
+  const ext = src.slice(prefix.length, semiIdx).toLowerCase();
   const type: "png" | "jpg" | "gif" =
     ext === "jpeg" || ext === "jpg" ? "jpg" : ext === "gif" ? "gif" : "png";
+  const b64 = src.slice(semiIdx + 8);
   try {
-    const data = Buffer.from(m[2], "base64");
+    const data = Buffer.from(b64, "base64");
     return { type, data };
   } catch {
     return null;
@@ -335,11 +366,10 @@ function parseDataUri(
  * Returns null if src is missing or not a data URI.
  */
 function imgToParagraph(imgHtml: string): Paragraph | null {
-  const srcMatch =
-    imgHtml.match(/src="([^"]+)"/i) ?? imgHtml.match(/src='([^']+)'/i);
-  if (!srcMatch) return null;
+  const srcValue = extractSrcAttribute(imgHtml);
+  if (!srcValue) return null;
 
-  const parsed = parseDataUri(srcMatch[1]);
+  const parsed = parseDataUriIterative(srcValue);
   if (!parsed) return null;
   if (!isValidImageData(parsed.type, parsed.data)) return null;
 
@@ -408,11 +438,9 @@ function parseParagraphBlock(pHtml: string): Paragraph[] {
     if (imgMatch.index > lastIndex) {
       children.push(...parseInline(inner.slice(lastIndex, imgMatch.index)));
     }
-    const srcMatch =
-      imgMatch[0].match(/src="([^"]+)"/i) ??
-      imgMatch[0].match(/src='([^']+)'/i);
-    if (srcMatch) {
-      const parsed = parseDataUri(srcMatch[1]);
+    const srcValue = extractSrcAttribute(imgMatch[0]);
+    if (srcValue) {
+      const parsed = parseDataUriIterative(srcValue);
       if (parsed && isValidImageData(parsed.type, parsed.data)) {
         const raw = getImageDimensions(parsed.type, parsed.data);
         if (isPlaceholderImage(raw, parsed.data)) {
@@ -610,43 +638,248 @@ function parseTableBlock(tableHtml: string): (Paragraph | Table)[] {
  *
  * Returns an empty array for empty/null input.
  */
-export function htmlToDocxElements(html: string): (Paragraph | Table)[] {
+export function htmlToDocxElements(
+  html: string,
+  mediaOut?: Map<string, DrawingMediaEntry> // rId → media entry; populated as a side-effect
+): (Paragraph | Table | ImportedXmlComponent)[] {
   if (!html?.trim()) return [];
 
-  const elements: (Paragraph | Table)[] = [];
+  // ---------------------------------------------------------------------------
+  // Guard: strip base64 data URIs BEFORE any regex processing.
+  // resolveHtmlImages() inlines images as data:image/...;base64,<huge payload>
+  // which makes the HTML string 100KB+. V8's regex engine uses internal recursion
+  // and overflows on strings this large. We extract the payloads into an array,
+  // replace them with short placeholders, run all regex on the small string,
+  // then restore them just before image rendering.
+  // All operations here are iterative (indexOf loops) — no regex on big strings.
+  // ---------------------------------------------------------------------------
+  const b64Store: string[] = [];
+  let safeHtml = "";
+  {
+    const needle = "data:image/";
+    const b64Chars = new Set(
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+    );
+    let cur = 0;
+    while (cur < html.length) {
+      const i = html.indexOf(needle, cur);
+      if (i === -1) { safeHtml += html.slice(cur); break; }
+      safeHtml += html.slice(cur, i);
+      const semi = html.indexOf(";base64,", i);
+      if (semi === -1 || semi - i > 40) {
+        // Not a real data URI — keep literal prefix and advance
+        safeHtml += needle;
+        cur = i + needle.length;
+        continue;
+      }
+      let end = semi + 8; // past ";base64,"
+      while (end < html.length && b64Chars.has(html[end])) end++;
+      b64Store.push(html.slice(i, end));
+      safeHtml += `__B64_${b64Store.length - 1}__`;
+      cur = end;
+    }
+  }
 
-  // Step 1: Extract all <table> blocks and replace with stable placeholders.
-  // This prevents the main block regex from partially matching nested table content.
+  // Iterative restore — also avoids regex on strings containing huge base64
+  const restoreB64 = (s: string): string => {
+    if (b64Store.length === 0) return s;
+    let out = "";
+    let cur = 0;
+    const tag = "__B64_";
+    while (cur < s.length) {
+      const i = s.indexOf(tag, cur);
+      if (i === -1) { out += s.slice(cur); break; }
+      out += s.slice(cur, i);
+      let ne = i + tag.length;
+      while (ne < s.length && s[ne] >= "0" && s[ne] <= "9") ne++;
+      if (s.slice(ne, ne + 2) === "__") {
+        out += b64Store[parseInt(s.slice(i + tag.length, ne), 10)] ?? "";
+        cur = ne + 2;
+      } else {
+        out += tag;
+        cur = i + tag.length;
+      }
+    }
+    return out;
+  };
+
+  /**
+   * Build a valid OOXML paragraph component containing a DrawingML block.
+   *
+   * ImportedXmlComponent.fromXmlString() returns an object with rootKey=undefined
+   * that wraps the real element as root[0].  Using root[0] directly gives the
+   * actual <w:p> component (rootKey="w:p"), which serialises correctly without
+   * a spurious <undefined> wrapper in the output document.
+   *
+   * The mc:AlternateContent MUST be inside <w:r> — placing it directly
+   * in <w:p> produces invalid OOXML that Word refuses to open.
+   */
+  const makeDrawingComponent = (drawXml: string): ImportedXmlComponent | null => {
+    const xmlStr =
+      `<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"` +
+      ` xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"` +
+      ` xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"` +
+      ` xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"` +
+      ` xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"` +
+      ` xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"` +
+      ` xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"` +
+      ` xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"` +
+      ` xmlns:v="urn:schemas-microsoft-com:vml"` +
+      ` xmlns:o="urn:schemas-microsoft-com:office:office"` +
+      ` xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing">` +
+      `<w:r>` +
+      drawXml +
+      `</w:r>` +
+      `</w:p>`;
+    try {
+      // fromXmlString returns { rootKey: undefined, root: [<w:p> component] }
+      // We use root[0] to get the actual <w:p> (rootKey="w:p"), avoiding the
+      // spurious <undefined> wrapper element.
+      const parsed = ImportedXmlComponent.fromXmlString(xmlStr);
+      const innerWP = (parsed as unknown as { root: ImportedXmlComponent[] }).root?.[0];
+      return (innerWP ?? parsed) as ImportedXmlComponent;
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Decode a base64 drawing payload from data-docx-drawing.
+   * Old format: base64(raw XML).
+   * New format: base64(JSON DrawingBundle with v:2, xml, media[]).
+   * Populates mediaOut with any referenced media files.
+   * Returns the ImportedXmlComponent for the drawing, or null on failure.
+   */
+  const resolveDrawingComponent = (b64: string): ImportedXmlComponent | null => {
+    try {
+      const decoded = Buffer.from(b64, "base64").toString("utf-8");
+      let drawXml = decoded;
+      // Try new bundle format
+      if (decoded.trimStart().startsWith("{")) {
+        try {
+          const bundle = JSON.parse(decoded) as DrawingBundle;
+          if (bundle?.v === 2 && bundle?.xml) {
+            drawXml = bundle.xml;
+            if (mediaOut && bundle.media?.length) {
+              for (const entry of bundle.media) {
+                mediaOut.set(entry.rId, {
+                  filename: entry.filename,
+                  data: Buffer.from(entry.data, "base64"),
+                  contentType: entry.contentType,
+                });
+              }
+            }
+          }
+        } catch { /* fall through to raw XML */ }
+      }
+      return makeDrawingComponent(drawXml);
+    } catch {
+      return null;
+    }
+  };
+
+  const elements: (Paragraph | Table | ImportedXmlComponent)[] = [];
+
+  // Step 0: Extract <div data-docx-drawing="…"> blocks before other processing.
+  // These carry self-contained DrawingML XML (wpg drawing groups) encoded as
+  // base64 in the attribute.  We lift them out to avoid confusing the table /
+  // paragraph parsers, then inject them as ImportedXmlComponent paragraphs.
+  const drawingStore: string[] = []; // index → raw XML block
+  let htmlNoDrawings = "";
+  {
+    const DRAW_OPEN = '<div data-docx-drawing="';
+    const DRAW_CLOSE = '"></div>';
+    let cur = 0;
+    while (cur < safeHtml.length) {
+      const openIdx = safeHtml.indexOf(DRAW_OPEN, cur);
+      if (openIdx === -1) { htmlNoDrawings += safeHtml.slice(cur); break; }
+      htmlNoDrawings += safeHtml.slice(cur, openIdx);
+      const b64Start = openIdx + DRAW_OPEN.length;
+      const b64End = safeHtml.indexOf(DRAW_CLOSE, b64Start);
+      if (b64End === -1) { htmlNoDrawings += safeHtml.slice(openIdx); break; }
+      const b64 = safeHtml.slice(b64Start, b64End);
+      drawingStore.push(b64);
+      htmlNoDrawings += `__DRAWING${drawingStore.length - 1}__`;
+      cur = b64End + DRAW_CLOSE.length;
+    }
+  }
+
+  // Step 1: Extract <table> blocks (iterative — safe for large strings)
   const tableBlocks: string[] = [];
-  const htmlNoTables = html.replace(/<table[\s\S]*?<\/table\s*>/gi, (match) => {
-    tableBlocks.push(match);
-    return `__TABLE${tableBlocks.length - 1}__`;
-  });
+  let htmlNoTables = "";
+  {
+    let cur = 0;
+    const lower = htmlNoDrawings.toLowerCase();
+    while (cur < htmlNoDrawings.length) {
+      const openIdx = lower.indexOf("<table", cur);
+      if (openIdx === -1) { htmlNoTables += htmlNoDrawings.slice(cur); break; }
+      htmlNoTables += htmlNoDrawings.slice(cur, openIdx);
+      const closeIdx = lower.indexOf("</table", openIdx + 6);
+      if (closeIdx === -1) { htmlNoTables += htmlNoDrawings.slice(openIdx); break; }
+      const closeEnd = htmlNoDrawings.indexOf(">", closeIdx + 7);
+      const tableEnd = closeEnd === -1 ? closeIdx + 8 : closeEnd + 1;
+      tableBlocks.push(htmlNoDrawings.slice(openIdx, tableEnd));
+      htmlNoTables += `__TABLE${tableBlocks.length - 1}__`;
+      cur = tableEnd;
+    }
+  }
 
   // Step 2: Merge standalone image-only <p> elements with the next <p>.
-  // mammoth emits Word picture-bullet icons as separate <p><img/></p> paragraphs
-  // instead of keeping them inline with the list item text. This transform re-joins
-  // them so the icon renders inline with its text (matching the original template).
   const htmlMerged = mergeImageOnlyParagraphs(htmlNoTables);
 
   // Step 3: Match top-level block elements sequentially.
+  // Safe now — safeHtml has short placeholders instead of huge base64 payloads.
   const blockRegex =
-    /(<p[^>]*>[\s\S]*?<\/p\s*>|<ul[^>]*>[\s\S]*?<\/ul\s*>|<ol[^>]*>[\s\S]*?<\/ol\s*>|<img[^>]*\/?>|__TABLE\d+__)/gi;
+    /(<p[^>]*>[\s\S]*?<\/p\s*>|<ul[^>]*>[\s\S]*?<\/ul\s*>|<ol[^>]*>[\s\S]*?<\/ol\s*>|<img[^>]*\/?>|__TABLE\d+__|__DRAWING\d+__)/gi;
 
   let match: RegExpExecArray | null;
   while ((match = blockRegex.exec(htmlMerged)) !== null) {
-    const block = match[0];
+    // Restore base64 before content parsing (images need real data URIs)
+    const block = restoreB64(match[0]);
 
     if (/^<p/i.test(block)) {
-      elements.push(...parseParagraphBlock(block));
+      // Check if this paragraph contains a drawing placeholder (happens when
+      // mammoth nests the sentinel <w:p> inside the parent paragraph).
+      const drawMatch = block.match(/__DRAWING(\d+)__/);
+      if (drawMatch) {
+        const dIdx = parseInt(drawMatch[1], 10);
+        const b64 = drawingStore[dIdx];
+        if (b64) {
+          // Emit text before the drawing as a paragraph
+          const beforeDraw = block.slice(0, block.indexOf(drawMatch[0]));
+          const stripped = beforeDraw.replace(/<[^>]+>/g, "").trim();
+          if (stripped) elements.push(...parseParagraphBlock(beforeDraw + "</p>"));
+          // Emit the drawing itself
+          {
+            const comp = resolveDrawingComponent(b64);
+            if (comp) elements.push(comp);
+          }
+          // Emit text after the drawing as a paragraph
+          const afterStart = block.indexOf(drawMatch[0]) + drawMatch[0].length;
+          const afterDraw = block.slice(afterStart);
+          const afterStripped = afterDraw.replace(/<[^>]+>/g, "").trim();
+          if (afterStripped) elements.push(...parseParagraphBlock("<p>" + afterDraw));
+        } else {
+          elements.push(...parseParagraphBlock(block));
+        }
+      } else {
+        elements.push(...parseParagraphBlock(block));
+      }
     } else if (/^<ul|^<ol/i.test(block)) {
       elements.push(...parseListBlock(block));
     } else if (/^<img/i.test(block)) {
       const imgPara = imgToParagraph(block);
       if (imgPara) elements.push(imgPara);
+    } else if (/^__DRAWING\d+__$/.test(block)) {
+      const dIdx = parseInt(block.replace(/^__DRAWING(\d+)__$/, "$1"), 10);
+      const b64 = drawingStore[dIdx];
+      if (b64) {
+        const comp = resolveDrawingComponent(b64);
+        if (comp) elements.push(comp);
+      }
     } else if (/^__TABLE\d+__$/.test(block)) {
       const tIdx = parseInt(block.replace(/^__TABLE(\d+)__$/, "$1"), 10);
-      const tHtml = tableBlocks[tIdx];
+      const tHtml = restoreB64(tableBlocks[tIdx] ?? "");
       if (tHtml) {
         const tableElements = parseTableBlock(tHtml);
         if (tableElements.length > 0) {
