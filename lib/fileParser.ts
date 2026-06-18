@@ -11,7 +11,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
-import { pdf } from 'pdf-to-img';
 import { createWorker } from 'tesseract.js';
 
 const require = createRequire(import.meta.url);
@@ -60,6 +59,7 @@ export function isAllowedFile(mimetype: string, filename: string): boolean {
 
 /** Run OCR on PDF pages (Bulgarian + English) and return combined text. Used for scanned PDFs. */
 async function extractPdfTextViaOcr(buffer: Buffer): Promise<string> {
+  const { pdf } = await import('pdf-to-img');
   const doc = await pdf(buffer, { scale: 2 });
   const worker = await createWorker('bul+eng', 1, {
     logger: () => {},
